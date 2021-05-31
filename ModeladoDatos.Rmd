@@ -1,0 +1,660 @@
+---
+title: "ModeladoDatos"
+author: "Luis Castillo & Kevin Quiroga"
+date: "6/12/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readxl)
+library(DT)
+library(spdep)
+library(ape)
+library(sp)
+library(MVA)
+library(Hmisc)
+library(normtest)
+library(nortest)
+library(spatialreg)
+library(asbio)
+library(plotly)
+library(corrplot)
+library(psych)
+library(Metrics)
+```
+
+# Modelado de Datos de CEa75 y CEa150
+
+```{r,include=FALSE}
+BD_MODELADO <- read_excel("D:/Kevin/Trabajos/Computacion estadistica/BD_MODELADO.xlsx")
+#View(BD_MODELADO)
+x <- BD_MODELADO$Avg_X_MCB 
+y <- BD_MODELADO$Avg_Y_MCE
+z <- BD_MODELADO$Avg_z
+DEM <- BD_MODELADO$DEM
+CE_70cm <- BD_MODELADO$Avg_CEa_07
+CE_150cm <- BD_MODELADO$Avg_CEa_15
+NDVI <- BD_MODELADO$NDVI
+Slope <- BD_MODELADO$SLOPE
+```
+
+```{r}
+datatable(BD_MODELADO,class = 'cell-border stripe', options = list(
+  pageLength = 10, autoWidth = TRUE),colnames = c('X (UTM)','Y (UTM)','CE a 70cm','CE a 150cm','NDVI','DEM','Slope','Z (elevation)'))
+```
+
+## Gráficos 3D
+
+### Gráfico de altitud, longitud contra Z
+
+```{r}
+fig_Z <- plot_ly(x = x, y = y, z = z, size = I(90))%>%
+            layout(
+                  scene = list(
+                              xaxis = list(title = "Longitud"),
+                              yaxis = list(title = "Latitud"),
+                              zaxis = list(title = "Elevation (M.A.S.L.)")
+    )
+  )%>%
+add_markers(color = "cyan")
+fig_Z
+```
+
+
+### Gráfico de altitud, longitud contra DEM
+
+```{r}
+fig_DEM <- plot_ly(x = x, y = y, z = DEM, size = I(90))%>%
+            layout(
+                  scene = list(
+                              xaxis = list(title = "Longitud"),
+                              yaxis = list(title = "Latitud"),
+                              zaxis = list(title = "DEM")
+    )
+  )%>%
+add_markers(color = "cyan")
+fig_DEM
+```
+
+### Variables explicativas
+
+CEa75  CEa150  NDVI  Slope  Z  DEM
+
+```{r}
+X_x <- as.matrix(BD_MODELADO[,c(3:8)])
+X_x
+```
+
+```{r}
+############################### Variables respuesta
+v_res75 <- X_x[,1]
+v_res150 <- X_x[,2]
+############################### Variables explicativas (independientes)
+v_exp75 <- X_x[,2:6]
+v_exp150 <- X_x[,c(1,3:6)]
+x75 <- as.matrix(v_exp75)
+x150 <- as.matrix(v_exp150)
+```
+
+### Coordenadas
+
+```{r}
+xydat <- as.matrix(BD_MODELADO[,1:2])
+```
+
+### Matriz de pesos
+
+```{r}
+MD <- as.matrix(dist(xydat, diag = T, upper = T))
+MD_inv <- as.matrix(1/MD)
+diag(MD_inv) <- 0
+W <- as.matrix(MD_inv)
+suma <- apply(W, 1, sum)
+We <- W/suma  # Estandarizado
+apply(We, 1, sum)
+```
+
+### Índices de Moran
+
+```{r,include=F}
+MI_CE75 <- Moran.I(v_res75, We);MI_CE75
+MI_CE150 <- Moran.I(v_res150, We);MI_CE150
+MI_NDVI <- Moran.I(X_x[,3], We);MI_NDVI
+MI_DEM <- Moran.I(X_x[,4], We);MI_DEM
+MI_SLOPE <- Moran.I(X_x[,5], We);MI_SLOPE
+MI_z <- Moran.I(X_x[,6], We);MI_z
+```
+
+```{r}
+Moran_o <- list() # Observado
+Moran_p <-list() # p.valor
+for(j in 1:6){
+  Moran_o[j]=Moran.I(X_x[,j], We)$observed
+}
+
+for(j in 1:6){
+  Moran_p[j]=Moran.I(X_x[,j], We)$p.value
+}
+
+Moran_o <- as.vector(Moran_o)
+list(Moran_o,Moran_p)
+data.frame(list(Moran_o,Moran_p))
+```
+
+### Matrices de Correlación
+
+```{r,warning=F,message=F}
+MCP <- rcorr(as.matrix(X_x[,1:6]), type = 'p')
+MCS <- rcorr(as.matrix(X_x[,1:6]), type = 's')
+Mcorp <- MCP$r
+Mcors <- MCS$r
+```
+
+### Gráfico de correlación
+
+```{r}
+par(mfrow = c(1,2))
+corrplot(Mcorp, order = 'hclust', tl.col = 'black', tl.srt = 45, main = 'Pearson')
+corrplot(Mcors, order = 'hclust', tl.col = 'black', tl.srt = 45, main = 'Spearman')
+```
+
+###
+
+```{r}
+des <- describe(X_x[,1:6])
+datatable(des,class = 'cell-border stripe')
+```
+
+```{r}
+par(mfrow = c(1,2))
+boxplot(X_x[,1], main = 'bx_CE_75')
+hist(X_x[,1], main = 'hist_CE_75')
+```
+
+```{r}
+par(mfrow = c(1,2))
+boxplot(X_x[,2], main = 'bx_CE_150')
+hist(X_x[,2], main = 'hist_CE_150')
+```
+
+```{r,include=F}
+X_x <- as.data.frame(X_x)
+bx_75 <- ggplot(X_x, aes(x=0, y=Avg_CEa_07)) + 
+  geom_boxplot(color='black', fill ='dark cyan') +
+  
+  xlim(-1,1)
+```
+
+```{r,include=F}
+hist_75 <-ggplot(X_x, aes(x=Avg_CEa_07)) + 
+  geom_histogram(color="black", fill="dark cyan", binwidth=0.6)
+```
+
+```{r}
+bx_75
+hist_75
+```
+
+```{r,include=F}
+bx_150 <- ggplot(X_x, aes(x=0, y=Avg_CEa_15)) + 
+  geom_boxplot(color ='black', fill = rgb(0.8,0.2,0.2)) +
+  
+  xlim(-1,1)
+
+hist_150 <-ggplot(X_x, aes(x=Avg_CEa_15)) + 
+  geom_histogram(color ='black', fill = rgb(0.8,0.2,0.2),  binwidth=0.4)
+```
+
+```{r}
+bx_150
+hist_150
+```
+
+### Pruebas de Normalidad
+
+```{r}
+cvm_75<-cvm.test(X_x[,1]);cvm_75
+cvm_150<-cvm.test(X_x[,2]);cvm_150
+shp_75<-shapiro.test(X_x[,1]);shp_75
+shp_150<-shapiro.test(X_x[,2]);shp_150
+
+shapi <- c()
+for(j in 1:6){
+  shapi[j]<- sf.test(X_x[,j])$p.value
+}
+shapi
+```
+
+```{r}
+lillie.test(X_x[,1])
+lillie.test(X_x[,2])
+ks.test(X_x[,1], X_x[,2])
+ad.test(X_x[,1])
+ad.test(X_x[,2])
+```
+
+# Modelo Clásico No espacial
+
+```{r}
+mod_cla75 <- lm(CE_70cm~Slope+z+CE_150cm)
+mod_cla150 <- lm(CE_150cm~Slope+z+CE_70cm)
+
+mod_cla75_log <- lm(CE_70cm~Slope+z+log(CE_150cm))
+mod_cla150_log <- lm(log(CE_150cm)~Slope+z+CE_70cm)
+
+summary(mod_cla75)
+summary(mod_cla150)
+summary(mod_cla75_log)
+summary(mod_cla150_log)
+```
+
+### Prueba de normalidad residual
+
+```{r}
+res1 <- mod_cla75$residuals
+shapiro.test(res1)
+res1_2 <- mod_cla150$residuals
+shapiro.test(res1_2)
+
+hist(res1)
+hist(res1_2)
+
+res2 <- mod_cla75_log$residuals
+shapiro.test(res2)
+res2_2 <- mod_cla150_log$residuals
+shapiro.test(res2_2)
+
+hist(res2)
+hist(res2_2)
+```
+
+Para que un modelo sea considerado adecuado, es necesario que sus residuosestén normalmente distribuidos es decir están normal e independientemente distribuidoscon   media 0 y varianza mínima
+
+### Simetria para los datos
+
+```{r}
+skew(X_x[,1])
+skewness.norm.test(X_x[,1])
+skew(X_x[,2])
+skewness.norm.test(X_x[,2]) # No es simétrico
+```
+
+### Simetria para los residuales
+
+```{r}
+skew(res1)
+skew(res1_2)
+skewness.norm.test(res1)
+skewness.norm.test(res1_2)
+skew(res2)
+skew(res2_2)
+skewness.norm.test(res2)
+skewness.norm.test(res2_2)
+```
+
+
+```{r}
+estima1 <- mod_cla75$fitted.values
+estima1_2 <- mod_cla150$fitted.values
+estima2 <- mod_cla75_log$fitted.values
+estima2_2 <- mod_cla150_log$fitted.values
+
+plot(CE_70cm, estima1,pch=16)
+plot(CE_70cm, estima1_2,pch=16)
+plot(CE_150cm, estima2,pch=16) ##Error
+plot(CE_150cm, estima2_2,pch=16) ##Error
+
+cor(CE_70cm, estima1)
+cor(CE_70cm, estima1_2)
+cor(CE_150cm, estima1)
+cor(CE_150cm, estima1_2)
+```
+
+```{r}
+res_c1 <- mod_cla75$residuals
+res_c2 <- mod_cla150$residuals
+
+shapiro.test(res_c1)
+shapiro.test(res_c2)
+
+cvm.test(res_c1)
+cvm.test(res_c2)
+
+moranres1 <- Moran.I(res_c1, We); moranres1
+moranres2 <- Moran.I(res_c2, We); moranres2
+```
+
+```{r}
+AIC(mod_cla75)
+AIC(mod_cla75_log)
+AIC(mod_cla150)
+AIC(mod_cla150_log)
+```
+
+
+Muestra dependencia espacial ($p~value = 0$)
+
+
+# Modelo autoregresivo puro
+
+$$Y = \lambda W Y + u$$
+
+```{r}
+contnb <- dnearneigh(coordinates(xydat),0,854, longlat = F)
+contnb
+dlist <- nbdists(contnb, xydat)
+dlist <- lapply(dlist, function(x) 1/x)
+Wve <- nb2listw(contnb, glist = dlist, style = 'W')
+```
+
+### Modelo aplicado a CEa 75cm
+
+```{r}
+map_75 <- spautolm(CE_70cm~1, data = BD_MODELADO, listw = Wve) ### modelo
+summary(map_75)
+```
+
+```{r}
+CE75E1 <- as.data.frame(map_75$fit['fitted.values']); CE75E1
+CE75E <- map_75$fit$fitted.values ## Estimados
+CE75E
+df75 <- data.frame(v_res75, CE75E)
+colnames(df75) <-  c('CE_obs','CE_est')
+plot(df75$CE_obs, df75$CE_est, cex=0.5, pch =19)
+resmap1 <- map_75$fit$residuals
+cor(df75$CE_obs, df75$CE_est)
+```
+
+```{r}
+plot(x = x, y = y, col = floor(abs(resmap1))+1, pch =19)
+plot(x = x, y = y, cex =abs(resmap1), pch =19)
+
+plot(x = x, y = y, cex =0.1*df75$CE_obs, pch =19)
+
+data2 <- data.frame(x = x, y = y, df75$CE_obs, df75$CE_est)
+colnames(data2) <- c('x', 'y', 'CE_obs', 'CE_est')
+p<-ggplot(data = data2, aes(x = x, y = y)) +
+  geom_point(cex = data2$CE_obs*0.2) +
+  geom_point(color = data2$CE_est)
+ 
+p
+```
+
+```{r}
+im_res_map_75 <- moran.mc(resmap1,Wve,nsim = 2000);im_res_map_75
+```
+
+
+### Modelo aplicado a CEa 150cm
+
+```{r}
+map_150 <- spautolm(CE_150cm~1, data = BD_MODELADO, listw = Wve) ### modelo
+summary(map_150)
+```
+
+```{r}
+CE150E <- as.data.frame(map_150$fit['fitted.values']); CE150E
+CE150E <- map_150$fit$fitted.values ## Estimados
+CE150E
+df150 <- data.frame(v_res150, CE150E)
+colnames(df150) <-  c('CE_obs','CE_est')
+plot(df150$CE_obs, df150$CE_est, cex=0.5, pch =19)
+resmap2 <- map_150$fit$residuals
+cor(df150$CE_obs, df150$CE_est)
+```
+
+```{r}
+plot(x = x, y = y, col = floor(abs(resmap2))+1, pch =19)
+plot(x = x, y = y, cex =abs(resmap2), pch =19)
+
+plot(x = x, y = y, cex =0.1*df150$CE_obs, pch =19)
+
+data2_1 <- data.frame(x = x, y = y, df75$CE_obs, df150$CE_est)
+colnames(data2_1) <- c('x', 'y', 'CE_obs', 'CE_est')
+p<-ggplot(data = data2_1, aes(x = x, y = y)) +
+  geom_point(cex = data2_1$CE_obs*0.2) +
+  geom_point(color = data2_1$CE_est)
+ 
+p
+```
+
+```{r}
+im_res_map_150 <- moran.mc(resmap2,Wve,nsim = 2000);im_res_map_150
+```
+
+# Modelo espacial del error
+
+$$Y=\lambda W Y+ \alpha 1_n+ X\beta + \epsilon$$
+
+### CEa 75cm
+
+```{r}
+mod_es_er_1 <- errorsarlm(CE_70cm~NDVI+Slope+z+CE_150cm+DEM,listw=Wve)
+summary(mod_es_er_1) # NDVI despreciable
+
+mod_es_er_2 <- errorsarlm(CE_70cm~Slope+z+CE_150cm+DEM,listw=Wve)
+summary(mod_es_er_2) # Mejor
+
+mod_es_er_3 <- errorsarlm(CE_70cm~Slope+z+CE_150cm,listw=Wve)
+summary(mod_es_er_3)
+```
+
+### Normalidad de residuales
+
+```{r}
+res_mod_es_er <- mod_es_er_2$residuals
+shapiro.test(res_mod_es_er)
+cvm.test(res_mod_es_er)
+```
+Los residuales son normales
+
+
+```{r}
+plot(df75$CE_obs, mod_es_er_2$fitted.values, cex=0.5, pch =19)
+
+cor(df75$CE_obs, mod_es_er_2$fitted.values)
+```
+
+```{r}
+moran_error_75 <- moran.mc(res_mod_es_er,Wve,nsim=2000)
+moran_error_75
+```
+
+### CEa 150cm
+
+```{r}
+mod_es_er_4 <- errorsarlm(CE_150cm~NDVI+Slope+z+CE_70cm+DEM,listw=Wve)
+summary(mod_es_er_4) # NDVI despreciable
+
+mod_es_er_5 <- errorsarlm(CE_150cm~Slope+z+CE_70cm+DEM,listw=Wve)
+summary(mod_es_er_5)
+
+mod_es_er_6 <- errorsarlm(CE_150cm~Slope+z+CE_70cm,listw=Wve)
+summary(mod_es_er_6)
+```
+
+### Normalidad de residuales
+
+```{r}
+res_mod_es_er_2 <- mod_es_er_6$residuals
+shapiro.test(res_mod_es_er_2)
+cvm.test(res_mod_es_er_2)
+```
+
+```{r}
+plot(df150$CE_obs, mod_es_er_6$fitted.values, cex=0.5, pch =19)
+
+cor(df150$CE_obs, mod_es_er_6$fitted.values)
+```
+
+
+```{r}
+moran_error_150 <- moran.mc(res_mod_es_er_2,Wve,nsim=2000)
+moran_error_150
+```
+
+
+# Modelo lambda y Rho 
+
+$$Y=\lambda W Y+ \alpha 1_n+ X\beta + u \\
+u=\rho W u + \epsilon$$
+
+### CEa 75cm
+
+```{r}
+mlrho <- sacsarlm(CE_70cm~Slope+z+CE_150cm+DEM,X_x,listw=Wve)
+summary(mlrho)
+```
+
+```{r}
+res_mlrho <- mlrho$residuals
+summary(res_mlrho)
+
+shapiro.test(res_mlrho)
+cvm.test(res_mlrho)
+```
+
+```{r}
+plot(df75$CE_obs, mlrho$fitted.values, cex=0.5, pch =19)
+
+cor(df75$CE_obs, mlrho$fitted.values)
+```
+
+
+```{r}
+moran_mlrho <- moran.mc(res_mlrho,Wve,nsim=2000)
+moran_mlrho
+```
+
+
+El modelo $\lambda$ y $\rho$ para este modelo se ajusta bien, ya que $\rho$ es significativo ($p~value=0.01039$)
+
+### CEa 150cm
+
+```{r}
+mlrho_150 <- sacsarlm(CE_150cm~Slope+z+CE_70cm,X_x,listw=Wve)
+summary(mlrho_150)
+```
+
+Este modelo no sirve para CEa 150cm ya que el $p~value=0.082$ 
+
+
+## Valores observados vs. estimados
+
+### Modelo Clásico
+```{r}
+rmse(CE_70cm, estima1) # CEa 75cm
+rmse(CE_150cm, estima1) # Cea 150cm
+```
+
+### Modelo autorregresivo puro
+```{r}
+rmse(df75$CE_obs, df75$CE_est) # CEa 75cm
+rmse(df150$CE_obs, df150$CE_est) # Cea 150cm
+```
+
+### Modelo del error
+```{r}
+rmse(df75$CE_obs, mod_es_er_2$fitted.values) # CEa 75cm
+rmse(df150$CE_obs, mod_es_er_6$fitted.values) # Cea 150cm
+```
+
+### Modelo Lambda y RHo
+```{r}
+rmse(df75$CE_obs, mlrho$fitted.values) # CEa 75cm
+```
+
+# Gráficas de CEa 75cm con variables que tienen relación
+
+```{r}
+fig_Slope <- plot_ly(x = x, y = y, z = Slope, size = I(90))%>%
+            layout(
+                  scene = list(
+                              xaxis = list(title = "Longitud"),
+                              yaxis = list(title = "Latitud"),
+                              zaxis = list(title = "Slope")
+    )
+  )%>%
+add_markers(color = BD_MODELADO$Avg_CEa_07)
+fig_Slope
+```
+
+```{r}
+fig_150 <- plot_ly(x = x, y = y, z = CE_150cm, size = I(90))%>%
+            layout(
+                  scene = list(
+                              xaxis = list(title = "Longitud"),
+                              yaxis = list(title = "Latitud"),
+                              zaxis = list(title = "CEa_150")
+    )
+  )%>%
+add_markers(color = BD_MODELADO$Avg_CEa_07)
+fig_150
+```
+
+```{r}
+fig_Z_1 <- plot_ly(x = x, y = y, z = z, size = I(90))%>%
+            layout(
+                  scene = list(
+                              xaxis = list(title = "Longitud"),
+                              yaxis = list(title = "Latitud"),
+                              zaxis = list(title = "Altitud")
+    )
+  )%>%
+add_markers(color = BD_MODELADO$Avg_CEa_07)
+fig_Z_1
+```
+
+```{r}
+fig_DEM_1 <- plot_ly(x = x, y = y, z = DEM, size = I(90))%>%
+            layout(
+                  scene = list(
+                              xaxis = list(title = "Longitud"),
+                              yaxis = list(title = "Latitud"),
+                              zaxis = list(title = "DEM")
+    )
+  )%>%
+add_markers(color = BD_MODELADO$Avg_CEa_07)
+fig_DEM_1
+```
+
+# Coordenada de interés para el modelo final
+
+```{r}
+plot(x=x,y=y,pch=16,col="blue")
+points(x=843600,y=956040,col="red",pch=16)
+```
+
+### Nueva matriz de datos
+```{r}
+BD_MODELADO <- as.data.frame(BD_MODELADO)
+new_p <- data.frame(843600,956040,0,0,0,0,0,0)
+names(new_p) <- c("Avg_X_MCB","Avg_Y_MCE","Avg_CEa_07","Avg_CEa_15","NDVI","DEM","SLOPE","Avg_z")
+new_W <- rbind(BD_MODELADO,new_p)
+new_XYdat_W <- as.matrix(new_W[,1:2])
+new_count <- dnearneigh(coordinates(new_XYdat_W),0,854,longlat = F)
+new_dlist <- nbdists(new_count,new_XYdat_W)
+new_dlist <- lapply(new_dlist,function(x)1/x)
+```
+
+### Nueva matriz de pesos
+
+```{r}
+new_Wve <- nb2listw(new_count,glist = new_dlist,style = 'W')
+```
+
+### Nueva matriz de identidad
+
+```{r}
+matrix_id <- diag(314)
+```
+
+
+
+
+![Por fin](D:/Kevin/Trabajos/Computacion estadistica/Capturas/Yess.jpg)
+
+
+
+

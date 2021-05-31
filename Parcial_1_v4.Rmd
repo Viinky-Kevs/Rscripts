@@ -1,0 +1,872 @@
+---
+title: "Parcial Diseno 2020-I"
+author: "Kevin Quiroga, Sergio Rocha"
+date: "4/11/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(agricolae)
+library(collapsibleTree)
+library(daewr)
+library(lsmeans)
+library(lmerTest)
+library(DT)
+library(ggplot2)
+library(car)
+library(readxl)
+```
+
+## <span style="color:firebrick">Punto 1</span>	
+<span style="color:darkcyan">**Diseño en Bloques incompletos Balanceados (Finding the Variance Analysis of the Balanced Incomplete Block Design / Función: BIB.test()**</span>
+
+$$ y_{ij}= \mu +\tau_i +\beta_j + \epsilon_{ij}$$
+
+$y_{íj}$ = Observación muestral
+$\mu$ = Media ajustada
+$\tau_i$ = Efecto del $i~ésimo$ tratamiento
+$\beta_j$ = Efecto del $j~esimo$ bloque
+$\epsilon_{ij}$ = Error aleatorio
+
+![BIBD](D:/Kevin/Trabajos/Computacion estadistica/Capturas/BIBD.jpg)
+
+**Este es un diseño factorial simple incompleto y balanceado, en bloques, parcialmente aleatorizado, se caracteriza porque el número de tratamientos es menor al de unidades experimentales** $(k < t)$**, y tiene una condición de aleatorización por par de niveles**
+
+$$H_0 = \hat\mu_1=\cdots=\hat\mu_5\\
+H_a = At~least~one~is~different$$
+
+```{r}
+run <- gl(10,3) # 10 = Numero de bloques, 3 = unidad experimental
+
+psi <- c(250,325,475,
+         250,475,550,
+         325,400,550,
+         400,475,550,
+         325,475,550,
+         250,400,475,
+         250,325,400,
+         250,400,550,
+         250,325,550,
+         325,400,475) # Tratamientos (5 tratamientos)
+
+trt1 <- c('250','325','475',
+         '250','475','550',
+         '325','400','550',
+         '400','475','550',
+         '325','475','550',
+         '250','400','475',
+         '250','325','400',
+         '250','400','550',
+         '250','325','550',
+         '325','400','475') # Tratamientos (5 tratamientos)
+
+
+monovinyl <- c(16,18,32,
+               19,46,45,
+               26,39,61,
+               21,35,55,
+               19,47,48,
+               20,33,31,
+               13,13,34,
+               21,30,52,
+               24,10,50,
+               24,31,37) # Respuestas
+
+Datos1<- data.frame(run, trt1, psi, monovinyl)
+datatable(Datos1, class = 'cell-border stripe',filter = 'top', options = list(
+  pageLength = 6, autoWidth = TRUE))
+
+
+out <- BIB.test(run,psi,monovinyl,test="waller",group=TRUE);out
+
+out_1 <- BIB.test(run,psi,monovinyl,test="tukey",group=TRUE,console=TRUE);out_1
+
+bar.err(out$means,variation="range",ylim=c(0,60),bar=FALSE,col=0)
+```
+
+
+```{r}
+# Se añade un barplot para estudiar el comportamiento de los datos
+aggregate(monovinyl ~ trt1, data = Datos1, FUN = mean)
+aggregate(monovinyl ~ trt1, data = Datos1, FUN = sd)
+ggplot(data = Datos1, aes(x = trt1, y = monovinyl, color = trt1)) +
+    geom_boxplot() +
+    theme_bw()
+# se comprueba con el shapiro test y con graficas la normalidad de los datos
+sp.test <- shapiro.test(Datos1$monovinyl)
+sp.test
+
+par(mfrow= c(2,3))
+qqnorm(Datos1[Datos1$trt1 == "250","monovinyl"], main = "250")
+qqline(Datos1[Datos1$trt1 == "250","monovinyl"])
+qqnorm(Datos1[Datos1$trt1 == "325","monovinyl"], main = "325")
+qqline(Datos1[Datos1$trt1 == "325","monovinyl"])
+qqnorm(Datos1[Datos1$trt1 == "400","monovinyl"], main = "400")
+qqline(Datos1[Datos1$trt1 == "400","monovinyl"])
+qqnorm(Datos1[Datos1$trt1 == "475","monovinyl"], main = "475")
+qqline(Datos1[Datos1$trt1 == "475","monovinyl"])
+qqnorm(Datos1[Datos1$trt1 == "550","monovinyl"], main = "550")
+qqline(Datos1[Datos1$trt1 == "550","monovinyl"])
+
+# se usa el test de Levene para comprobar la igualdad de varianzas
+
+leveneTest(y = Datos1$monovinyl, group = Datos1$trt1, center = "median")
+
+
+# ANOVA
+
+anova <- aov(Datos1$monovinyl ~ Datos1$trt1 + Datos1$run)
+summary(anova)
+
+#gráficos par comprobar los supuestos después de correr el ANOVA 
+
+plot(anova, 1)
+plot(anova, 2)
+
+# En el plot(anova, 1) y plot(anova, 2) se puede evidenciar la homocedasticidad y la normalidad, en el ANOVA se puede evidenciar que el tratamiento tiene efecto en el monovinil.
+
+#Prueba de comparación múltiple
+
+TukeyHSD(anova, 'Datos1$trt1')
+residual <- anova$residuals
+hist(residual)
+#prueba de normalidad
+shapiro.test(residual)
+#preuba de homocedasticidad
+bartlett.test(residual~Datos1$trt1)
+```
+
+
+
+## <span style="color:firebrick">Punto 2</span>
+
+<span style="color:darkcyan">**Diseño Carolina I (North Carolina Designs I) / Función: carolina ()**</span>
+
+![North Carolina Design I](D:/Kevin/Trabajos/Computacion estadistica/Capturas/NCI.jpg)
+
+**Factorial incompleto, anidado, con bloqueo en el set, sin aleatorizar**
+
+$$y_{ijklt} = \mu + \tau_i + \beta_{ij} + \alpha_{ik} +\rho_{ikl} + \beta\rho_{ijkl} + \epsilon_{ijklt}$$
+
+$y_{ijklt}$ = variable de respuesta
+$\mu$ = media general
+$\tau_i$ = efecto del i-ésimo set ,
+$\beta_{ij}$ = efecto del J-ésimo bloque en el i-ésimo set
+$\aplha_{ik}$ = efecto del k-ésimo macho i-ésimo set
+$\rho_{ikl}$ = efecto de la I-ésima hembra cruzada con el k-ésimo macho, i-ésimo set
+$\beta\rho_{ijkl}$ = efecto de interacción
+$\epsilon_{ijklt}$ = error asociado a cada observación 
+
+$$H_0 = var_{F2}=var_{F3}\\
+H_a = var_{F2} \neq var_{F3}$$
+
+
+```{r}
+data(DC)
+#View(DC$carolina1)
+carolina1 <- DC$carolina1
+View(carolina1)
+# str(carolina1)
+output<-carolina(model=1,carolina1)
+output[][-1]
+```
+
+```{r}
+set <- carolina1$set
+male <- carolina1$male
+female <- carolina1$female
+rep <- carolina1$rep
+yield <- carolina1$yield
+
+set <- factor(set)
+male <- factor(male)
+female <- factor(female)
+rep <- factor(rep)
+male
+
+sergy <- lm(yield ~ set + set/rep + male/set + set/(male:female) +set/(rep:male:female),data = carolina1)
+ano <- aov(sergy)
+summary(ano)
+```
+
+
+```{r}
+collapsibleTree(carolina1, hierarchy = c("male","female","progenie"),hierarchy_attribute = c("male","female","progenie"))
+```
+
+<span style="color:darkcyan">**Diseño Carolina II (North Carolina Designs II) / Función: carolina ()**</span>
+
+![North Carolina Design II](D:/Kevin/Trabajos/Computacion estadistica/Capturas/NCII.jpg)
+
+**Factorial completo, sin anidamiento, sin bloquo y sin aleatorización**
+
+$$y_{íjk}=\mu+\tau_i+\beta_j+(\tau\beta)_{ij}+\epsilon_{ijk}$$
+$y_{íjk}$ = $k-ésima$ observación en la progenie $i-j~ésima$
+$\mu$ = Media general
+$\tau_i$ = Efecto del $i-ésimo$ macho
+$\beta_j$ = Efecto de la $j-ésima$ hembra
+$(\tau\beta)_{ij}$ = Interacción del $i-ésimo$ macho por la $j-ésima$ hembra 
+$\epsilon_{ijk}$ = Error asociado a $k$ observaciones
+
+```{r}
+data(DC)
+carolina2 <- DC$carolina2
+# str(carolina2)
+#View(carolina2)
+majes<-subset(carolina2,carolina2[,1]==1)
+majes<-majes[,c(2,5,4,3,6:8)]
+output<-carolina(model=2,majes[,c(1:4,6)])
+output[][-1]
+```
+
+<span style="color:darkcyan">**Diseño Carolina III (North Carolina Designs III) / Función: carolina ()**</span>
+
+```{r}
+carolina3 <- DC$carolina3
+# str(carolina3)
+View(carolina3)
+output<-carolina(model=3,carolina3)
+output[][-1]
+```
+
+
+## <span style="color:firebrick">Punto 3</span>
+<span style="color:darkcyan">**Diseño en bloque aumentados (Finding the Variance Analysis of the Augmented block Design) / Función: DAU.test()**</span>
+
+![ABD](D:/Kevin/Trabajos/Computacion estadistica/Capturas/BAD.jpg)
+
+**Factorial simple desbalanceado, sin anidamiento, con bloqueo incompleto, parcialmente aleatorio**
+
+![ABD](D:/Kevin/Trabajos/Computacion estadistica/Capturas/BAD1.jpg)
+
+**Factorial simple desbalanceado, sin anidamiento, con bloqueo completo, completamente aleatorizado**
+
+$$Y_{ij}=\mu+\tau_i+\beta_j+\epsilon_{íj}$$
+
+$$H_0 = \mu_A = \cdots =\mu_k\\
+H_a = At~least~one~is~different$$
+
+```{r}
+block <- c(rep("I",7),
+           rep("II",6),
+           rep("III",7))
+
+trt <- c("A","B","C","D","g","k","l",
+         "A","B","C","D","e","i",
+         "A","B","C","D","f","h","j") # Tratamientos control A, B, C y D. 
+                                      # Aumentados g,k,l,e,i,f,h y j
+
+yield <- c(83,77,78,78,70,75,74,
+           79,81,81,91,79,78,
+           92,79,87,81,89,96,82)
+
+DBA <- data.frame(block,trt,yield)
+
+
+
+datatable(DBA, class = 'cell-border stripe',filter = 'top', options = list(
+  pageLength = 6, autoWidth = TRUE))
+
+out <- DAU.test(block,trt,yield,method="lsd", group=TRUE,console = TRUE);out
+
+print(out$groups)
+
+ggplot(data = DBA, aes(x = block, y = yield, colour = block)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(legend.position = "none")
+
+ggplot(data = DBA, aes(x = trt, y = yield, colour = trt)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(legend.position = "none")
+
+ggplot(data = DBA, aes(x = block, y = yield, colour = trt)) +
+      geom_boxplot() + theme_bw()
+
+
+#plot(out)
+```
+
+
+## <span style="color:firebrick">Punto 4</span>
+<span style="color:darkcyan">**Diseño Grecolatino (Graeco - latin square design) /Función: design.graeco ()**</span>
+
+$$y_{íjkl}=\mu+\theta_i+\tau_j+\omega_k+\psi_l+\epsilon{ijkl}\\
+i=1,2,\cdots,\rho\\
+j=1,2,\cdots,\rho\\
+k=1,2,\cdots,\rho\\
+l=1,2,\cdots,\rho$$
+
+![Graeco Latin Design](D:/Kevin/Trabajos/Computacion estadistica/Capturas/GRALA.jpg)
+
+**Factorial completo, aleatorizado, sin anidamiento; con bloqueo en columna, fila y letra griega**
+
+$y_{íjkl}$ = Observación en fila $i$, la columna $l$, para la letra latina $j$ y la letra gierga $k$
+$\mu$ = Media global
+$\theta_i$ = Efecto de la $i-ésima$ fila
+$\tau_j$ = Efecto del tratamiento $j$ de la letra latina
+$\omega_k$ = Efecto del tratamiento de la letra griega $k$
+$\psi_l$ = Es el efecto de la colunma $l$
+$\epsilon_{ijkl}$ = Error aleatorio
+
+```{r}
+tempe <- c("T1","T1","T1","T1",
+           "T2","T2","T2","T2",
+           "T3","T3","T3","T3",
+           "T4","T4","T4","T4")
+proce <- c("P1","P2","P3","P4",
+           "P1","P2","P3","P4",
+           "P1","P2","P3","P4",
+           "P1","P2","P3","P4")
+llatin <- c(3,2,4,1,
+            2,3,1,4,
+            1,4,2,3,
+            4,1,3,2)
+lgrec <- c(2,3,4,1,
+           1,4,3,2,
+           4,1,2,3,
+           3,2,1,4)
+y_i <- c(5,12,13,13,
+         6,10,15,11,
+         7,5,5,7,
+         11,10,8,9)
+
+tempe <- factor(tempe)
+proce <- factor(proce)
+llatin <- factor(llatin)
+lgrec <- factor(lgrec)
+
+data_1 <- data.frame(tempe,proce,llatin,lgrec,y_i)
+graeco <- design.graeco(llatin,lgrec,serie = 0)
+
+graeco_1 <- graeco$book
+plots <- as.numeric(graeco_1[,1]);plots
+
+print(matrix(plots,byrow=TRUE,ncol=4))
+
+cathe <- lm(y_i~proce+tempe+llatin+lgrec)
+ANOVA <- aov(cathe)
+summary(ANOVA)
+```
+
+
+## <span style="color:firebrick">Punto 5 </span>
+<span style="color:darkcyan">**Diseño cuadrado latino (Latin Square Design) /Función: design.lsd()**</span>
+
+![Latin square Design](D:/Kevin/Trabajos/Computacion estadistica/Capturas/LATIND.jpg)
+
+**Factorial completo, aleatorizado, sin anidamiento, con bloqueo en fila y columna**
+
+$$y_{ijk}=\mu + \alpha_i +\tau_j +\beta_k + \epsilon_{ijk}\\
+i = 1,\cdots, \rho\\
+j = 1,\cdots, \rho\\
+k = 1,\cdots, \rho$$
+
+$y_{ijk}$ = Es la observación de la $i-ésima$ fila, $k-ésima$ columna y $j-ésimo$ tratamiento
+$\mu $ = media general
+$\alpha_i$ = El efecto de la $i-ésima$ de la fila
+$\tau_j$ = El efecto del $j-ésimo$ tratamiento
+$\beta_k$ = El efecto de la $k-ésima$ columna
+$\epsilon_{ijk}$ = Error aleatorio
+
+$$H_0=(\mu_a -\mu_b)=(\mu_a-\mu_c)=(\mu_b-\mu_c)\\
+H_a= At~least~one~is~different$$
+
+```{r}
+Lsd_aov <- aov( AUC ~ Subject + Period + Treat, data = bioeqv)
+
+trat_lsd <- bioeqv$Treat
+
+lsd_test <- design.lsd(levels(trat_lsd),serie = 3,);lsd_test
+
+summary(Lsd_aov)
+
+model.tables(Lsd_aov, type = "means" )$tables$Treat
+plot(TukeyHSD(Lsd_aov, "Treat"))
+
+plot(Lsd_aov)
+
+#Prueba de comparación múltiple
+
+TukeyHSD(Lsd_aov, 'Treat')
+residual_1 <- Lsd_aov$residuals
+hist(residual_1)
+#prueba de normalidad
+shapiro.test(residual_1)
+#preuba de homocedasticidad
+bartlett.test(residual_1~bioeqv$Treat)
+
+## No se cuple el supuesto de normalidad
+
+```
+
+
+### <span style="color:darkblue">Ejemplo 2</span>
+```{r}
+
+Tratamiento <- c('A', 'B', 'C', 'D')
+tabla <- design.lsd(trt=Tratamiento, seed = 4)
+tabla
+matrix(data=tabla$book[,4], c(5,5))
+
+
+Tratamiento <- c('D', 'A', 'C', 'B',
+                 'B', 'C', 'A', 'D',
+                 'D', 'C', 'B', 'A',
+                 'A', 'B', 'D', 'C')
+Variedad <- c(1,1,1,1,
+              2,2,2,2,
+              3,3,3,3,
+              4,4,4,4)
+
+
+Parcela <- c(1,2,3,4,
+             1,2,3,4,
+             1,2,3,4,
+             1,2,3,4)
+
+RespuestaX <- c(12, 14, 15, 13,
+                11, 12, 14, 14,
+                13, 11, 10, 13,
+                8, 10, 9, 9)
+
+
+
+
+TratamientoF <- factor(Tratamiento)
+Vaiedad <- factor(Variedad)
+Parcela <- factor(Parcela)
+
+ 
+DatosX <- data.frame(Variedad, Parcela, RespuestaX)
+
+ggplot(data = DatosX, aes(x = TratamientoF, y = RespuestaX, colour =TratamientoF,)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(legend.position = "none")
+
+ggplot(data = DatosX, aes(x = Variedad, y = RespuestaX, colour =Variedad, group = Variedad)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(legend.position = "none")
+
+ggplot(data = DatosX, aes(x = Parcela, y = RespuestaX, colour =Parcela,)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(legend.position = "none")
+
+#Gracias a los boxplots parece ser que el mayor efecto se debe a la variedad
+
+Modelo <- lm(RespuestaX~TratamientoF+Variedad+Parcela)
+anova_lsd2 <- aov(Modelo)
+summary(anova_lsd2)
+
+# El anova muestra significancia para el factor Variedad
+
+ldsT_T<-LSD.test(y = anova_lsd2, trt = 'TratamientoF', group = T, console = T)
+ldsT_V<-LSD.test(y = anova_lsd2, trt = 'Variedad', group = T, console = T) 
+ldsT_P<-LSD.test(y = anova_lsd2, trt = 'Parcela', group = T, console = T)
+
+residual_3 <- anova_lsd2$residuals
+hist(residual_3)
+#prueba de normalidad
+shapiro.test(residual_3)
+#preuba de homocedasticidad
+bartlett.test(residual_3~DatosX$Variedad)
+
+
+plot(anova_lsd2, 1)
+plot(anova_lsd2, 2)
+
+# Se cumplen los supuestos de normalidad y homocedasticidad
+
+
+```
+
+
+## <span style="color:firebrick">Punto 6</span>
+<span style="color:darkcyan">**Diseño Bloques completos (Randomized Complete Block Design) /Función: design.rcbd()**</span>
+
+![Randomized Complete Block Design](D:/Kevin/Trabajos/Computacion estadistica/Capturas/RCBD.jpg)
+
+**Factorial simple, completamente aleatorio, sin anidamiento, con bloqueo**
+
+$$y_{ij}=\mu+\beta_i+\tau_i+\epsilon_{íj}$$
+$y_{ij}$ = Observaciones
+$\mu$ = media global
+$\beta_i$ = Efecto de los bloques
+$\tau_i$ = Efecto de los tratamientos
+$\epsilon$ = Error aleatorio
+
+```{r}
+Dosis <- c(0.0,0.5,1,1.5,2) # dosis em mg/Kg
+
+RCB_design <- design.rcbd(Dosis, 10,continue = F)
+
+rata <- rcb$block
+
+rcb <- RCB_design$book
+
+rcb$respuesta <- drug$rate
+
+
+
+names(rcb)[2] = 'Rata'
+rcb
+
+
+ggplot(data = rcb, aes(x = Rata, y = respuesta, colour = Rata,)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(legend.position = "none")
+
+ggplot(data = rcb, aes(x = Dosis, y = respuesta, colour = Dosis,)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(legend.position = "none")
+
+ggplot(data = rcb, aes(x = Rata, y = respuesta, colour = Dosis)) +
+      geom_boxplot() + theme_bw()
+
+# Gracias al boxplot se puede presumir que la mayor variación en las medias es debido a la interación con la Rata
+
+A_de_V <- aov(respuesta~Rata + Dosis, data = rcb )
+summary(A_de_V)
+plot(A_de_V, 1) # Hay homocedasticidad
+plot(A_de_V, 2) # El comportamiento de los datos es Nromal
+
+
+```
+
+Hay una diferencia significativa de acuerdo a las ratas y no a la dosis
+
+## <span style="color:firebrick">Punto 7</span>
+<span style="darkcyan">**Diseño Parcelas divididas (Split Plot Design) /Función: design.split ()**</span>
+
+**Factorial incompleto, anidado con bloqueo en parcela (plot), totalmente aleatorizado**
+
+![Split Plot](D:/Kevin/Trabajos/Computacion estadistica/Capturas/SplitPlot.jpg)
+
+$$y_{ijk}=\mu+\tau_i+\beta_j+(\tau\beta)_{íj}+\gamma_k+(\tau\gamma)_{ik}+(\beta\gamma)_{jk}+(\tau\beta\gamma)_{ijk}+\epsilon_{ijk}\\
+i=1,\cdots,r\\
+j=1,\cdots,a\\
+k=1,\cdots,b$$
+
+$\tau_i$ = Replicaciones
+$\beta_j$ = Medias de tratamientos
+$(\tau\beta)_{ij}$ = Error de toda la parcela
+$\gamma_k$ = Tratamiento subplot
+$(\tau\gamma)_{ik}$ = Las replicas x $B$
+$(\beta\gamma)_{jk}$ = Interacciones de $A$ y $B$
+$(\tau\beta\gamma)_{ijk}$ = Error del subplot
+$\epsilon_{ijk}$ = Error aleatorio
+
+$$H_0:\mu_{Control}=\mu_{New}\\H_a:\mu_{Control}\neq\mu_{New}$$
+
+```{r}
+dtsp <- read.csv("D:/Kevin/Trabajos/Diseno de Experimentos/Dataspliplot.txt", sep="")
+datatable(dtsp,filter = "top",class = 'cell-border stripe', options = list(
+  pageLength = 8, autoWidth = TRUE))
+```
+
+```{r}
+dtsp[, "plot"] <- factor(dtsp[, "plot"])
+str(dtsp)
+
+ggplot(data = dtsp, aes(x = fertilizer, y = mass, colour = fertilizer,)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(legend.position = "none")
+
+ggplot(data = dtsp, aes(x = variety, y = mass, colour = variety,)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(legend.position = "none")
+
+ggplot(data = dtsp, aes(x = fertilizer, y = mass, colour = variety,)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(legend.position = "none")
+
+with(dtsp, interaction.plot(x.factor = variety, trace.factor = fertilizer, response = mass))
+
+fit <- lmer(mass ~ fertilizer * variety + (1 | plot), data = dtsp)
+anova_1<-anova(fit)
+anova_1
+
+anova_2<-aov(mass~fertilizer*variety + plot:fertilizer, data = dtsp)
+summary(anova_2)
+
+
+plot(anova_2, 1)
+plot(anova_2, 2)
+
+# en las graficas se puede evidenciar la homocedasticidad y la normalidad de los datos
+# Gracias a los boxplot y el ANOVA se puede concluir que ambos factores tienen efecto sobre la respuesta
+```
+
+La relación entre fertilzante y varidad es insignificante, mientras que los efectos por separado, son significantemente diferenciadores, por lo que se rechaza $H_0$ 
+
+## <span style="color:firebrick">Punto 8</span>
+<span style="color:darkcyan">**Diseño Lattice balanceado, con análisis función PBIB.test**</span>
+
+$$y_{ijk}=\mu+\tau_i+\gamma_j+\rho_{k(i)}+\epsilon_{ijk}$$
+$y_{ijk}$ = Observaciones
+$\mu$ = Media global
+$\tau_i$ = Efecto del $i-ésimo$ tratamiento
+$\gamma_j$ = Efecto de la $j-ésima$ reiplación
+$\rho_{k(i)}$ = Bloque dentro del efecto replicado
+$\epsilon_{ijk}$ = Error aleatorio
+
+**Diseño de bloques incompleto, sin anidamiento; factorial simple, con bloques aleatorios**
+
+![Lattice design](D:/Kevin/Trabajos/Computacion estadistica/Capturas/LATTICE.jpg)
+
+$$H_0 = \mu_1=\cdots=\mu_9\\
+H_a = At~least~one~is~different$$
+
+```{r}
+# Vector replicación
+rep <- rep(1:4,each=9)
+
+# Vector bloqueo
+block <- rep(1:12,each=3)
+
+# Vector tratamiento
+trt<-c(1,2,3,4,5,6,7,8,9,
+3,4,8,2,6,7,1,5,9,
+1,4,7,2,5,8,3,6,9,
+3,5,7,2,4,9,1,6,8)
+
+# Vector respuesta
+gain.wt <-c(2.20,1.84,2.18,2.05,0.85,1.86,0.73,1.60,1.76, 1.71,1.57,1.13,1.76,2.16,1.80,1.81,1.16,1.11,1.19,1.20,1.15,2.26,1.0,1.45,2.12,2.03,1.63,2.04,0.93,1.78,1.50,1.60,1.42,1.77,1.57,1.43)
+
+dt_2 <- data.frame(rep,block,trt,gain.wt)
+
+modeltt <- PBIB.test(block,trt,rep,gain.wt,k=3);modeltt
+
+sergy_2 <- lm(gain.wt~trt,dt_2)
+andres <- aov(sergy_2)
+summary(andres)
+```
+
+## <span style="color:firebrick">Punto 9</span>
+<span style="color:darkcyan">**Strip-Plot desing, con la función Strip.plot()**</span>
+
+![Strip Plot](D:/Kevin/Trabajos/Computacion estadistica/Capturas/StripPlot.jpg)
+
+**Factorial completo, sin anidamiento, totalmente aleatorizado sin bloqueo**
+
+$$y_{ijk}=\mu+\tau_i+\beta_j+(\tau\beta)_{ij}+\gamma_k+(\tau\gamma)_{ik}+(\beta\gamma)_{jk}+\epsilon_{ijk}$$
+
+```{r}
+StripPlotdata <- read_excel("D:/Kevin/Trabajos/Diseno de Experimentos/StripPlotdata.xlsx")
+#View(StripPlotdata)
+str(StripPlotdata)
+
+StripPlotdata$Varieties <- as.factor(StripPlotdata$Varieties)
+StripPlotdata$Fertilizer <- as.factor(StripPlotdata$Fertilizer)
+
+str(StripPlotdata)
+
+attach(StripPlotdata)
+
+Variedades <- StripPlotdata$Varieties
+Fertilizante <- StripPlotdata$Fertilizer
+Bloque <- StripPlotdata$block
+Rendimiento <- StripPlotdata$yield
+
+modelSP = strip.plot(BLOCK = Bloque,
+                   COL = Variedades,
+                   ROW = Fertilizante,
+                   Y = Rendimiento)
+```
+
+## Parcial 1 - Resumenes
+
+### Diseño en parcelas divididas
+
+**http://207.67.83.164/quality-progress/2007/10/laboratory/when-should-you-consider-a-split-plot-design.html**
+
+En ocasiones la correcta comprensión de los diseños de experimentos es fundamental para la obtención de información. El diseño de parcelas divididas se utiliza principalmente cuando tenemos dos factores, uno de ellos que es difícil de variar y l otro por lo contrario varia fácilmente, el primero recibe el nombre de "Parcela completa" mientras que el segundo se conoce como "sub parcela". Como ejemplo podemos imaginar un experimento de campo agrícola en el cual se tienen parcelas de tierra adyacentes, cada una de las cuales recibe la misma fertilización, esta es la parcela completa. Por otro lado, tenemos el tipo de semilla, que vendría siendo la subparcela, y es aplicada aleatoriamente dentro de cada parcela. El número de parcelas completas corresponde al número de veces que se reinicia el factor de la parcela completa. El número de experimentos (N) es igual al número de subparcelas.
+
+A pesar de que este diseño parce ser más complicado que uno completamente aleatorizado, existen implementaciones y ventajas estadísticas al correr este tipo de experimento.
+
+Si quisiéramos realizar un diseño factorial completo $2^3$ para evaluar el efecto de tres factores requeriríamos de 8 corridas aleatorizadas, luego dentro de cada una cada nivel de cada factor es reiniciado.
+
+**Tabla 1**
+
+| X1 | X2 | X3 | Orden de ejecución potencial |
+|:--:|:--:|:--:|:----------------------------:|
+| +1 | +1 | +1 |6|
+| +1 | +1 | -1 |1|
+| +1 | -1 | +1 |5|
+| +1 | -1 | -1 |2|
+| -1 | +1 | +1 |3|
+| -1 | +1 | -1 |4|
+| -1 | -1 | +1 |7|
+| -1 | -1 | -1 |8|
+
+Por motivos prácticos no siempre se reiniciará los niveles de los factores, podemos comparar la corrida 6 con la 2, en las cuales el factor X1 se mantiene al mismo nivel mientras los otros dos cambian. a esto se le conoce como una parcela dividida inadvertida. De hecho, se ha corrido un diseño de parcelas divididas a pesar de que erróneamente se considere un diseño completamente aleatorizado. Este análisis hará pensar que las corridas son independientes cuando en realidad no lo son y podría conducir a conclusiones engañosas sobre el efecto de los factores e incluso declarar a un factor estadísticamente significativo o no significativo cuando en realidad es importante.
+
+### Orden en el experimento
+
+**https://www.sciencedirect.com/science/article/pii/S002203021630621X**
+
+Si el experimentador desea no reiniciar los factores en cada corrida tiene más sentido elegir un experimento en parcelas divididas donde se usan las mimas ocho corridas, pero con un orden cuidadosamente asignado, no significa que no se haya aleatorizado, sino que la aleatorización se hizo de forma más estructurada. también será importante analizar los datos como un diseño de parcelas divididas conduciendo a conclusiones correctas sobre el efecto de los tratamientos. Se espera observar que las observaciones dentro de la parcela completa que no es reiniciada estarán correlacionadas, ya que serán más similares que observaciones en las que se reinicien todos los factores.
+
+Al determinar el orden de las corridas del experimento en parcelas divididas existen dos aleatorizaciones: la primera es el orden de las corridas de las parcelas completas y la otra el orden en el que se hacen las observaciones dentro de cada parcela. Esto conduce a dos términos de error en el modelo, esto influye en cómo debe llevarse a cabo el análisis y en como difieren los diseños dependiendo del tamaño de los términos de error relativos.
+
+Dependiendo de qué tan importantes son la estimación o la predicción, el diseño de parcelas divididas inadvertido puede ser un 50% efectivo con respecto a uno en el que se agrupen adecuadamente las observaciones dentro de una parcela completa. En algunas situaciones el diseño de parcelas divididas puede arrojar parámetros estimados del modelo más precisas que uno completamente aleatorizado.
+
+**Tabla 2**
+
+| X1 | X2 | X3 | Número de la parcela completa|
+|:--:|:--:|:--:|:-----------------------------:|
+| +1 | +1 | +1 |1|
+| +1 | -1 | -1 |1|
+| +1 | -1 | +1 |2|
+| +1 | +1 | -1 |2|
+| -1 | +1 | +1 |3|
+| -1 | -1 | -1 |3|
+| -1 | -1 | +1 |4|
+| -1 | +1 | -1 |4|
+
+
+### Sopesando las opciones
+
+Si tenemos en cuenta el costo del experimento en consideración, es más fácil justificar el uso de este diseño. Si los factores difíciles de cambiar son muy costosos o consumen mucho tiempo entonces elegir este diseño representará grandes ahorros. Existen enfoques para cuantificar los costos relativos del experimento en donde el costo total se asume que es la suma ponderada del numero de parcelas completas (#WP) y el número total de observaciones (N) : $C = WP + rN$ en donde $r = CSP/CWP$ es el costo relativo de cambiar un factor en la subparcela comparado con cambiar un factor en la parcela completa. En este costo se incluye el costo de medir las respuestas en cada observación.
+
+Pro ejemplo un valor r de 0.5 significaría la mitad de los costos de cambiar los niveles del factor de la subparcela en comparación con cambiar los niveles del factor de la parcela completa, si estos últimos son más costosos o difíciles de cambiar entonces se podría considerar aumentar el número de observaciones dentro de cada parcela completa. Aunque combinar el costo y la calidad del diseño en una misma métrica no es adecuado, esto puede ser una herramienta para la toma de decisiones.
+
+### El diseño correcto
+
+ Existen ciertas características a tener en cuenta a la hora de diseñar este experimento, tanto cualitativas como el balance del numero de observaciones por parcela completa y el numero de niveles de cada factor, como cuantitativas como la correcta estimación de los términos de error de la subparcela y la parcela completa. Ya que las diferencias entre experimentos presentan diferentes prioridades hay que entender qué es óptimo para un experimento y el enfoque en el criterio mas relevante para los objetivos del proyecto. Una de las ventajas de este diseño es que los parámetros del modelo principal pueden ser estimados de forma separada entre los términos de error de la parcela completa y la subparcela. Éste es un diseño muy práctico e importante, estos diseños de parcelas divididas pueden aumentar la cantidad de información que un profesional puede extraer de un experimento diseñado.
+
+### Reconocimiento apropiado de las unidades experimentales en los estudios animales en las ciencias lácteas
+
+El “diseño de sonido de experimentos” y la correcta implementación de métodos estadísticos apropiados para el análisis de los datos es crítica para la producción de resultados científicos significativos, que son tanto replicables como reproducibles. En el campo agrícola no se tiene un completo entendimiento de un termino ambiguo o vago como lo es el de ‘unidad experimental’. La unidad experimental, también conocida como unidad de replicación, es la entidad más pequeña que es asignada independientemente de otras unidades a un tratamiento particular. Las unidades experimentales son cambiables, que quiere decir que no difieren de ninguna manear fundamental, de esta forma se pueden obtener inferencias confiables sin importar cual tratamiento fue aplicado a cuál unidad.
+
+Si se quisiera, por ejemplo, estudiar el efecto de dos tipos de dieta diferentes se podría aplicar aleatoriamente un tipo de dieta a varios sets de corrales, cada uno con varias vacas dentro. Estos corrales serían la unidad experimental pero no se podría saber si las diferencias entre dos de ellos se deban a el efecto de la dieta, el efecto entre los corrales o una combinación de ambos. Habría que aplicar las dietas a un numero mayor de corrales, este numero depende de que tan grande se espera que el efecto de la dieta sea, que tan variables son las observaciones de corrales con el mismo tipo de dieta, y la variabilidad entre corrales y dentro de cada corral.
+
+Un termino diferente a este es el de unidad observacional o unidad de muestreo. Se define como la entidad física a la cual una salida de interés es medida en un experimento.  En el ejemplo anterior se podría dar el caso de que ambos términos coincidieran con la misma entidad física si por ejemplo el corral fuera tanto la unidad a la que aplicamos el tratamiento como aquella de la cual obtenemos nuestra observación, por otro lado, si la unidad de la cual tomamos la muestra fueran las vacas entonces tendríamos que los corrales son las unidades experimentales y las vacas las unidades de muestreo. Esto sería ejemplo de un diseño anidado, el corral está anidado al tratamiento, y la vaca está anidada al corral, y por tanto crearan una estructura jerárquica en los datos lo cual quiere decir que los datos no son mutuamente independientes, sino que por el contrario poseen una correlación impuesta por el diseño experimental.
+
+En el ejemplo mencionado esto se debe a razones biológicas del comportamiento de las vacas como la dominancia o por cuestiones de la gestión de los corrales. Estas interacciones entre vacas son diferentes a las que causaría el corral, como el tamaño del corral, condiciones del sustrato o la disponibilidad de sombra. En este caso en el cual las unidades de muestreo están anidadas a las unidades experimentales las observaciones se conocen como submuestras, pseudoreplicados, o replicados técnicos para indicar que estas observaciones no están correlacionadas y por tanto no tienen independencia. Estas estructuras de datos jerárquicas se conocen como anidadas o en bloques.
+
+“Las unidades experimentales son definidas en términos de las asignaciones de los tratamientos independientes, mientras las unidades observacionales son definidas en términos de las medidas de las respuestas” 
+
+Las observaciones no representan necesariamente replicaciones, y usualmente las unidades de muestreo se encuentran dentro de las unidades experimentales, las cuales determinan el número de replicas del experimento. Las réplicas implican una repetición independiente de un componente experimental básico, como el tratamiento, y se consideran un requisito valido primordial para la inferencia de un experimento valido y confiable. Esto es necesario dado que los resultados puedan ser reproducibles al menos bajo las condiciones específicas del experimento. Además, los resultados no serían realizaciones aberrantes de un experimento debido a circunstancias imprevistas y la variabilidad entre unidades experimentales que definen el error experimental son apropiadamente estimadas y por tanto las hipótesis subsecuentes son adecuadamente calibradas.
+
+Consideremos una disposición alternativa de un diseño cuadrado latino $3x3$ que consiste en 3 tratamientos, 3 periodos, y 3 corrales, con múltiples vacas por corral. Hay dos escenarios que suponer. En primer lugar, un escenario A en el cual los tratamientos dietéticos son alimentar a las vacas a de un mismo corral, el tratamiento es asignado aleatoriamente al corral. Por el contrario, el escenario B en donde los tratamientos son asignados aleatoriamente y aplicados individualmente a cada vaca. Se utilizará el ejercicio de ‘¿qué haría Fisher?’ (WWFD), el cual es similar al ejercicio de los cuadrados medios del ANOVA para distinguir correctamente el error experimental y consecuentemente distinguir entre unidad experimental y unidad observacional. 
+
+![Figura 1](D:/Kevin/Trabajos/Computacion estadistica/Capturas/Figura1.jpeg){width=30%}
+
+![Figura 2](D:/Kevin/Trabajos/Computacion estadistica/Capturas/Figura2.jpeg){width=30%}
+
+Es importante resaltar las posiciones relativas de las filas correspondiente a la estructura del tratamiento y las filas correspondientes a los elementos del diseño experimental, al igual que su combinación para caracterizar apropiadamente el proceso de recolección de los datos. La primera tabla ilustra el caso A donde los tratamientos fueron asignados aleatoriamente a los corrales. Cada tratamiento se aplica aleatoriamente dentro de un periodo, siendo reasignado al inicio de cada periodo. Por tanto, el corral es la unidad experimental evidenciado en la tabla al observar la fila “CorralxPeriodo” justo debajo de la de “tratamiento”. Al ser cada corral la unidad experimental para el tratamiento éstos definen los niveles de las replicaciones independientes para los tratamientos en los datos jerárquicos y por tanto define el error experimental.  Así las vacas dentro de cada corral en un periodo dado son las unidades observacionales, definiendo el error de muestreo mas no el experimental.  La interacción entre tratamientos y corrales, tratamiento y periodo, se asumen inexistentes para estimar el error de medida y no se consideran en la figura 1. 
+
+En la figura 2 tenemos el escenario B, en donde los tratamientos fueron asignados aleatoriamente a las vacas individuales dentro de un mismo corral en un periodo dado, con reasignación del tratamiento al inicio de cada periodo. Las posiciones de los términos en esta tabla varían para representar las diferencias en el proceso de aleatorización y recolección de datos.  “Periodo x vaca(corral)” identifica a las vacas que indican la unidad experimental, que a la vez son las unidades de muestreo. El “corralxperiodo” representa una estructura de bloqueo efectivo, en el cual los tratamientos se asignan aleatoriamente a vacas individuales dentro de un corral. El periodo se puede considerar como parte del diseño experimental y debe considerarse cada caso particular para determinarlo al igual que con la interacción entre el tratamiento y el periodo. Esto es importante de definir puesto que tiene implicaciones en la inferencia posterior dado que determina como se define el error experimental para el tratamiento.
+
+Posteriormente se puede transformar la columna del “combinado” para desarrollar un predictor lineal para especificar el modelo lineal. Es importante comprender la estructura jerárquica de los datos para una comprensión del proceso de recolección de datos. A pesar de que ambos escenarios sean construidos con un diseño de cuadrado latino 3x3 las diferencias en la aleatorización conducirían a discrepancias en la estructura jerárquica con respecto al tratamiento de interés, y por tanto identificando diferentes entidades físicas como la unidad experimental.
+
+Es importante una clara y detallada descripción de como fue recolectada la información y como se diseñó el experimento para poder establecer el modelo del diseño y por tanto, entender estas diferencias y elegir entre los posibles escenarios. Al despreciar el efeto del diseño y el modelo estadístico que no encajen con el proceso de recolección de los datos se pueden obtener grados de libertad erróneos para el denominador de un estadístico F-test aumentando su valor de 2 a 742. Y por tanto el denominador correspondiente decrecerá inflando el valor del F-ratio, lo cual causará un aumento en el error de tipo I y de falsos positivos.  Todo esto conducirá a considerar erróneamente significativas diferencias en el tratamiento que en realidad no lo son.
+
+El modelo estadístico especificado para el análisis de los datos debe describir un proceso plausible que de lugar a las observaciones al capturar la importancia del efecto de las variables independientes sobre la variable respuesta, y especificando cualquier restricción de aleatorización de estructura que induzca correlación entre las observaciones. En los modelos mixtos la estructura jerárquica nos permite verla información de los niveles de un factor incluso si no es la unidad experimental. Pueden reconocer simultáneamente múltiples fuentes de variabilidad aleatoria in un set de datos, evaluando simultáneamente los niveles de dos factores y usar uno o el otro como error experimental del tratamiento. De esta forma se puede garantizar un correcto reconocimiento de la unidad experimental.
+La varianza estimada entre las unidades experimentales determinan el error estándar estimado de las diferencias de los tratamientos (no de la media), que es utilizado para el planteamiento de hipótesis y la extracción del p-valor. 
+
+La correcta identificación de las unidades experimentales y de los modelos mixtos es importante para determinar la interferencia y tomar una muestra representativa de la población a la cual aplicar las conclusiones. En primer lugar, se acomoda el alcance de la interferencia en capas al diseño jerárquico. En segundo lugar, un diseño experimental de sonido permite descubrir cuales son las unidades experimentales y las unidades observacionales para obtener resultados significativos en escalas pequeñas y grandes de interferencia. Por tanto, se requiere determinar la variabilidad entre factores que muestren una respuesta distinta a un tratamiento dado. Parce ser que el alcance de la interferencia influye en la irreproducibilidad en la investigación. Esto puede conducir a apreciaciones limitada o mal entendimiento y generalización de los estudios por parte de los científicos. La estructura de datos jerárquica mal planteada puede aumentar los grados de libertad y F-ratios dando como resultado numerosos falsos positivos que no se pueden replicar. Por ello es importante reconocer adecuadamente el alcance de interferencia para poder establecer las condiciones especificas para la reproducibilidad. De lo contrario los resultados de una investigación, incluso si se caracterizan y testean bien, podrían no ser aplicables a un contexto diferente.
+
+En conclusión, una misma entidad física puede servir de unidad experimental o unidad observacional dentro de un mismo experimento, es por tanto importante definir correctamente cuál es la unidad experimental para cada caso específico ya que no se pueden reducir a la misma respuesta para todos los factores tratamiento bajo todas las condiciones. Así se pueden estudiar los distintos efectos en diferentes escenarios logísticos que involucren los mismos factores.   La determinación de la unidad experimental depende de cómo fue establecido el experimento, cómo fue recolectada la información y el alcance de la interferencia. Se debe enfatizar en estas cuestiones para la producción de resultados replicables y reproducibles en las ciencias.
+
+### Unidad Experimental y replicación
+
+**https://online.stat.psu.edu/stat502/lesson/6/6.1-0**
+
+Para poder explicar que es una unidad experimental se utiliza una situación donde se quiere evaluar el efecto de agua contaminada en peces (lesiones o enfermedades). Para esto se dispone 2 acuarios, cada uno con 50 peces; posterior a un acurio se le aplica agua limpia y al otro agua contamianda. Después de 30 días, se toma de cada acuario 10 peces y se analizan las lesiones generadas. A cada acuario se le denomina $unidad~experimental$ ya que es donde se aplica el tratamiento (agua contaminada o limpia). No hay que confundir con los peces la unidad experimental, ya que para que cada pez se denomine $unidad~experimental$ se debe aplicar el tratamiento uno por uno, lo cual sería totalmente ineficiente. En esta situación no hay replicación, por lo que los dos tratamientos se aplican en el mismo tiempo. Por último las unidades de muestreo son los peces que se tomaron para determinar el número de lesiones.
+
+### Fundamentos del diseño de experimentos: Pautas para un diseño de experimentos exitoso
+**by Casler. M**
+
+**https://doi.org/10.2134/agronj2013.0114**
+
+La pregunta que se debe realizar antes de empezar un experimento debe ser, ¿El fracaso es una opción? Según los cazadores de mitos (Savage, 2009) es una opción. Para los cientificos existe una cantidad de dinero alto invertido y esfuerzo de por medio, lo que convierte al fallo en una opción que debe eliminarse. Cuando se realiza, por ejemplo, un experimento en dos producciones agricolas,se quiere comparar las medias del resultado e inferir y concluir sobre los resultados
+
+**Replicación**
+
+¿Para qué sirve?
+
+$Primero$: Provee un mecanismo para estimar el error experimental, lo cual es escencial para la validéz de la hipótesis.
+
+$Segundo$: Provee el mecanismo para incrementar la precisión de un experimento.
+
+$Tercero$: Incrementa el alcance de la inferencia del experimento.
+
+$Cuarto$: Afecta al control del error.
+
+Importante recordar que las replicaciones deben aplicarse principalmente a las $unidades~experimentales$. Estas replicas observacionales deben ocurrir en una escala espacial y temporal la cual abarque la aplicación de todos los tratamientos.
+
+La replicación a la escala apropiada es esencial debido a la variabilidad inherente que existe dentro de los sistemas biológicos y para evitar confundir las diferencias de tratamiento con otros factores que pueden variar entre las unidades experimentales.
+
+**Número de replicas**
+
+La replica experimental puede ocurrir en en cuatro niveles básicos:
+
+$i$. La $unidad~experimental$.
+
+$ii$. La replicación en todo el experimento.
+
+$iii$. Muestreo dentro de uno o más niveles dentro de las $unidades~experimentales$.
+
+$iv$. Mediciones repetidas.
+
+El número de réplicas y la distribución de esos números en las diversas formas de réplica es una de las decisiones más difíciles y complejas en el diseño de un experimento. El número de repeticiones tiene un efecto directo, altamente predecible, repetible y tangible sobre la precisión y la capacidad de detectar diferencias entre tratamientos.
+
+**Experimentos sin repicación**
+
+Existe situaciones especiales donde la inverción se hace principalmente en los tratamientos, y esto imposibilita en la replicación de los mismos. 
+
+Ya que se le da poca importancia a la replicación los investigadores tienen 3 opciones.
+
+$i$. Realizar los experimentos en múltiples fincas, utilizando fincas como bloques.
+
+$ii$. Utilizar diseños de parcelas de control en los que un tratamiento de control se intercala con los otros tratamientos, de manera óptima en un patrón de parcelas de todo lo demás.
+
+$iii$. Utilizar una combinación de ambos enfoques.
+
+Los diseños aumentados representan una forma específica de diseño que puede manejar cientos o miles de tratamientos, la mayoría de los cuales no se replican.
+
+**Aleatorización**
+
+El principio de aleatoriedad se aplica a la correcta realización de experimentos en dos niveles. Primero, una definición cuidadosa de los materiales e instalaciones experimentales que se incluirán en el experimento exige que cada uno de ellos sea muestreado adecuadamente para garantizar que esté representado correctamente
+
+![Imagen 2](D:/Kevin/Trabajos/Computacion estadistica/Capturas/Fig8.jpg){width=30%}
+
+**Bloqueo**
+
+Tiene dos propositos:
+
+$i$. Para precisión: Para crear grupos de $unidades~experimentales$ que son más homogéneas de lo que ocurriría con muestreo aleatorio de toda la población de $unidades~experimentales$.
+
+$ii$. Por conveniencia: Para permitir diferentes tamaños de $unidades~experimentales$ cuando parcelas más grandes o áreas experimentales más grandes son requeridas para la aplicación de un factor en comparación con otro factores.
+
+![Imagen 2](D:/Kevin/Trabajos/Computacion estadistica/Capturas/Fig9.jpg){width=30%}
+
+**Tamaño de unidades experimentales**
+
+El último pilar del diseño experimental es el que menos se comprende y posee la menor cantidad de resultados teóricos para respaldar las observaciones empíricas.
+
+El concepto de tamaño óptimo de parcela ($unidad~experimental$) es muy antiguo y es anterior a los primeros conceptos de $Fisher$ de diseño experimental y análisis de varianza. El concepto se basa en la Ley de Smith (Smith, 1938), que se deriva de la observación general de una relación asintótica negativa entre la varianza (por unidad o por parcela única) y el tamaño de la parcela. 
+
+![Imagen 3](D:/Kevin/Trabajos/Computacion estadistica/Capturas/Fig11.jpg){width=40%}
+
+### Conclusión 
+
+La investigación con material biológico es costoso, tanto monetario como emocional. Como tal, los investigadores biológicos siempre deben seguir el mantra, "el fracaso no es una opción". Un diseño experimental fallido se manifiesta generalmente como un experimento con $P$ valores altos, dejando al investigador con conclusiones inciertas o equívocas: ¿los tratamientos realmente no son diferentes entre sí, es mi diseño experimental defectuoso debido a una mala planificación y toma de decisiones, o hubo alguna alteración desconocida e invisible que ocurrió en el experimento, causando errores? Rara vez se pueden responder estas preguntas cuando los $P$ valores son altos, lo que genera resultados no publicables y una pérdida de tiempo y dinero.
+
+![Presentado por los empresaurios](D:/Kevin/Trabajos/Computacion estadistica/Capturas/Empresaurios.jpg)
+
+
+
+

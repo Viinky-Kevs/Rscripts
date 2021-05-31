@@ -1,0 +1,148 @@
+---
+title: "Tarea Integral"
+author: "Kevin Quiroga"
+date: "15/9/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Repaso Código Integrales (aproximaciones de Área)
+
+```{r}
+inte <- function(x) x^3
+x1 <- seq(0,1,by = 0.01)
+plot(x1, inte(x1),type='l', col = 'black',lwd=2)
+polygon(c(0,x1,1),c(0,inte(x1),0), col ='pink')
+```
+
+# Suma trapezoidal
+```{r}
+n <- 20
+a <- 0
+b <- 1
+h <- (b-a)/n
+xi <- a+(0:n)*h;xi
+plot(x1, inte(x1),type='l', col = 'black',lwd=2, main = 'suma trapezoidal')
+for(j in 1:n){
+  segments(xi[j],0,xi[j+1],0,col = 'blue',lwd = 2)
+  segments(xi[j+1],0,xi[j+1],inte(xi[j+1]),col = 'blue')
+  segments(xi[j+1],inte(xi[j+1]),xi[j],inte(xi[j]),col = 'blue')
+}
+pot1 <- (h/2)*(inte(a)+inte(b))
+pot2 <- (h/2)*(sum(2*inte(a+(1:(n-1)*h))))
+protra <- pot1+pot2
+protra
+```
+
+# Sumas de Riemann
+## por la derecha
+
+```{r}
+plot(x1, inte(x1),type='l', col = 'black',lwd=2, main = 'Riemann por la derecha')
+for (l in 1:n) {
+  segments(xi[l],0,xi[l+1],0,col = 'red',lwd=2)
+  segments(xi[l+1],0,xi[l+1],inte(xi[l+1]),col = 'red',lwd=2)
+  segments(xi[l+1],inte(xi[l+1]),xi[l],inte(xi[l+1]),col = 'red',lwd=2)
+  segments(xi[l],inte(xi[l+1]),xi[l],0,col = 'red',lwd=2)
+}
+prode<-sum(inte(xi[-1]))*h
+prode
+```
+## Por la izquierda
+```{r}
+plot(x1, inte(x1),type='l', col = 'black',lwd=2, main = 'Riemann por la izquierda')
+for (l in 1:n) {
+  segments(xi[l],0,xi[l+1],0,col = 'green',lwd=2)
+  segments(xi[l],0,xi[l],inte(xi[l]),col = 'green',lwd=2)
+  segments(xi[l+1],0,xi[l+1],inte(xi[l]),col = 'green',lwd=2)
+  segments(xi[l+1],inte(xi[l]),xi[l],inte(xi[l]),col = 'green',lwd=2)
+}
+proiz<-sum(inte(xi[-(n+1)]))*h
+proiz
+```
+## Función de Montecarlo
+
+```{r}
+plot(x1, inte(x1),type='l', col = 'black',lwd=2, main = 'Montecarlo')
+
+mc.in <- function(n1,a,b){
+  x <- runif(n1,a,b)
+  y <- runif(n1,0,inte(b))
+  co <- ifelse(y<=inte(x),'red','black')
+  points(x,y,col = ifelse(y<=inte(x),'red','black'))
+}
+n1=5000
+mc.in(n1,a,b)
+
+x2 <- runif(n1,a,b)
+y2 <- runif(n1,0,inte(b))
+co <- ifelse(y2<=inte(x2),'red','black')
+table(co)/n1
+```
+
+
+```{r}
+mc.3 <- function(n3,a,b){
+  x <- runif(n3,a,b)
+  f <- (b-a)*mean(inte(x))
+  return(f)
+}
+n3=1000
+mc.3(n3,a,b)
+```
+## Tarea
+### Resolver por simulación la siguiente integral
+
+$$\int_{0}^{2e}ln(x)dx = lim_{b \to 0}\int_{b}^{2e}ln(x)dx $$
+
+```{r}
+integralT <- function(x) log(x)
+x4 <- seq(0,2*exp(1),by = 0.01)
+plot(x4, integralT(x4),type='l', col = 'black',lwd=2,ylab = 'y',xlab = 'x')
+abline(v=1,h=0)
+```
+```{r}
+plot(x4, integralT(x4),type='l',ylim = c(0,2), col = 'black',lwd=2,ylab = 'y',xlab = 'x')
+a <- 0.0001
+b <- 2*exp(1)
+puntos <- 10000
+SimuInte <- function(puntos,a,b){
+  x <- runif(puntos,a,b)
+  y <- runif(puntos,0,integralT(b))
+  co <- ifelse(y<=integralT(x),'yellow','black')
+  points(x,y,col = ifelse(y<=integralT(x),'yellow','black'))
+}
+SimuInte(puntos,a,b)
+rect(1,0,b,integralT(b), border = 'red')
+x5 <- runif(puntos,a,b)
+y5 <- runif(puntos,0,integralT(b))
+co <- ifelse(y5<=integralT(x5),'yellow','black')
+table(co)/puntos
+(table(co)/puntos)*(b-1)*(integralT(b))
+```
+```{r}
+plot(x4, integralT(x4),type='l',ylim = c(-10,2),xlim = c(0,1), col = 'black',lwd=2,ylab = 'y',xlab = 'x')
+a <- 0.0001
+b <- 1
+puntos <- 50000
+SimuInte <- function(puntos,a,b){
+  x <- runif(puntos,a,b)
+  y <- runif(puntos,-10,0)
+  co <- ifelse(y<=integralT(x),'black','yellow')
+  points(x,y,col = ifelse(y<=integralT(x),'black','yellow'))
+}
+SimuInte(puntos,a,b)
+rect(0,-10,1,0,border = 'red')
+x5 <- runif(puntos,a,b)
+y5 <- runif(puntos,-10,0)
+co <- ifelse(y5<=integralT(x5),'black','yellow')
+(table(co)/puntos)*-4
+```
+
+
+
+
+

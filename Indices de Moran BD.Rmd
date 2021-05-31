@@ -1,0 +1,129 @@
+---
+title: "Índices de Moran (BD Modelado)"
+author: "Kevin Quiroga"
+date: "18/10/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(plotly)
+library(ape)
+library(DT)
+```
+
+## Datos con conductividad eléctrica y altitud
+
+```{r,include=FALSE}
+library(readxl)
+BD_MODELADO <- read_excel("D:/Kevin/Trabajos/Computacion estadistica/BD_MODELADO.xlsx")
+x <- BD_MODELADO$Avg_X_MCB 
+y <- BD_MODELADO$Avg_Y_MCE
+z <- BD_MODELADO$Avg_z
+DEM <- BD_MODELADO$DEM
+CE_70cm <- BD_MODELADO$Avg_CEa_07
+CE_150cm <- BD_MODELADO$Avg_CEa_15
+```
+
+```{r}
+datatable(BD_MODELADO,class = 'cell-border stripe', options = list(
+  pageLength = 20, autoWidth = TRUE),colnames = c('X (UMT)','Y (UMT)','CE a 70cm','CE a 150cm','NDVI','DEM','Slope','Z (elevation)'))
+```
+
+
+### Gráfico de conductividad eléctrica a 70cm con coordenadas UTM contra Z
+
+```{r}
+fig3D_70 <- plot_ly(x=x,y=y,z=z,size = I(90))%>%
+ layout(
+    scene = list(
+      xaxis = list(title = "Coordinate X (UTM)"),
+      yaxis = list(title = "Coordinate Y (UTM)"),
+      zaxis = list(title = "Elevation (M.A.S.L.)")
+    )
+  )%>%
+  add_markers(color = CE_70cm)
+fig3D_70
+```
+
+### Gráfico de conductividad eléctrica a 70cm con coordenadas UTM contra DEM
+
+```{r}
+fig3D_70_1 <- plot_ly(x=x,y=y,z=DEM,size = I(90))%>%
+ layout(
+    scene = list(
+      xaxis = list(title = "Coordinate X (UTM)"),
+      yaxis = list(title = "Coordinate Y (UTM)"),
+      zaxis = list(title = "DEM")
+    )
+  )%>%
+  add_markers(color = CE_70cm)
+fig3D_70_1
+```
+
+### Gráfico de conductividad eléctrica a 150cm con coordenadas UTM contra Z
+
+```{r}
+fig3D_150 <- plot_ly(x=x,y=y,z=z,size = I(90))%>%
+ layout(
+    scene = list(
+      xaxis = list(title = "Coordinate X (UTM)"),
+      yaxis = list(title = "Coordinate Y (UTM)"),
+      zaxis = list(title = "Elevation (M.A.S.L.)")
+    )
+  )%>%
+  add_markers(color = CE_150cm)
+fig3D_150
+```
+
+
+### Gráfico de conductividad eléctrica a 150cm con coordenadas UTM contra DEM
+
+```{r}
+fig3D_150_1 <- plot_ly(x=x,y=y,z=DEM,size = I(90))%>%
+ layout(
+    scene = list(
+      xaxis = list(title = "Coordinate X (UTM)"),
+      yaxis = list(title = "Coordinate Y (UTM)"),
+      zaxis = list(title = "DEM")
+    )
+  )%>%
+  add_markers(color = CE_150cm)
+fig3D_150_1
+```
+
+### Índice de Moran a 70cm de profundidad
+
+```{r}
+Ce_dist <- as.matrix(dist(cbind(x=x, y=y)))
+dim(Ce_dist)
+
+Ce_dist_inv <- 1/Ce_dist
+Ce_dist_inv[is.infinite(Ce_dist_inv)] <- 0
+diag(Ce_dist_inv) <- 0
+Ce_dist_inv[1:10,1:10]
+
+Moran.I(CE_70cm,Ce_dist_inv)
+```
+
+### Índice de Moran a 150cm de profundidad
+
+```{r}
+Ce_dist <- as.matrix(dist(cbind(x=x, y=y)))
+dim(Ce_dist)
+
+Ce_dist_inv <- 1/Ce_dist
+Ce_dist_inv[is.infinite(Ce_dist_inv)] <- 0
+diag(Ce_dist_inv) <- 0
+Ce_dist_inv[1:10,1:10]
+
+Moran.I(CE_150cm,Ce_dist_inv)
+```
+## Índice de Moran hallado con GeoDa
+
+![Índice de Moran CE a 70cm](Capturas/IndexGeo70cm.jpg)
+
+![Índice de Moran CE a 70cm](Capturas/IndexGeo150cm.jpg)
+
+Para más información, leer el siguiente link https://geodacenter.github.io/workbook/5a_global_auto/lab5a.html#creating-a-moran-scatter-plot
+
