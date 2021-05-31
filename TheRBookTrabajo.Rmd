@@ -1,0 +1,2346 @@
+---
+title: "The R Book"
+author: "Sergio Rocha & Kevin Quiroga"
+date: "17/11/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE,warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(plotly)
+library(ggplot2)
+library(MASS)
+library(DT)
+library(tripack)
+library(spatial)
+library(spatstat)
+library(spdep)
+library(nlme)
+library(RODBC)
+```
+
+**En el siguiente trabajo se hace una síntesis de los capítulos 14, 16 y 26 del Libro R (**$The~R~Book$**, second edition) por** $M.~Crawley$
+
+Para efectos del aprendizaje los ejemplos mostrados en el libro se han modificado con un enfoque agronómico.
+
+# Cap 14 - Count Data - Recuento de Datos
+
+Con el recuento de datos el número $0$ aparece frecuentemente como valor de la variable respuesta. En el capítulo se tratan los datos como frecuencia (cuantos veces sucede algo), pero no se sabe cuantas veces no sucede. Por ende se utlizan proporciones, donde se sabe el número de veces que sucede algo en específico como las vaces que no sucede.
+
+## 14.1 - Una regresión con errores de Poisson
+
+Se presenta en el siguiente ejemplo como recuento (número de parcelas con plantas de cebolla podridas por $Enterobacter~cloacae$ como variable respuesta y la distancia (en kilometros) del rio Bogotá como variable explicativa continua única.
+
+**http://www.scielo.org.co/pdf/nova/v16n29/1794-2470-nova-16-29-00071.pdf**
+
+```{r}
+clusters <- read.delim("D:/Kevin/Trabajos/Diseno de Experimentos/therbook/clusters.txt")
+attach(clusters)
+names(clusters)
+```
+
+Se puede observar una tendencia inversamente proporcional, entre mayor sea la distancia menor seran la pudrición en las plantas de cebolla. Pero, ¿Será esta tendencia significativa? Se debe hacer una regresion de casos vs. distancia con la función glm (con error de Poisson).
+
+```{r}
+model1 <- glm(Decay~Distance,poisson)
+summary(model1)
+```
+
+Si se observa el P valor, se puede evidenciar que la tendencia no es significativa, pero se debe analizar la desviación residual. Bajo el error de Poisson, se asume que la desviación residual debe ser igual a los grados de libertad de los residuales (ya que la varianza y la media deben ser iguales). El hecho de que la desviación residual sea más grande que los grados de libertad de los residuales, indica que se tiene una sobredisperción (extra, inexplicable variación en la respuesta). Se compensa la sobredisperción ajustando el modelo a quasi-Poisson.
+
+```{r}
+model2 <- glm(Decay~Distance,quasipoisson)
+summary(model2)
+```
+
+Como se observa, al compensar la sobredisperción, esta incrementa el $p$ valor a 0.183, entonces no hay evidencia convincente que soporte la existencia de una tendencia en la incidencia de la pudrición en las plantas de cebolla con la distancia del río Bogotá. Para ilustrar el modelo ajustado a través de la información, se necesita entender que la función glm con el error Poisson usa el link logaritmico, entonces el parametro estimado y las predicciones desde el modelo (el "predictor lineal") esta en logaritmos, y necesita ser antilogartimico $exp(yv)$ antes de dibujar la línea ajustada.
+
+```{r}
+xv <- seq(0,100)
+yv <- predict(model2,list(Distance=xv))
+y <- c(xv,exp(yv))
+
+fig_dist <- plot_ly(data = clusters, x = ~Distance, y = ~Decay,
+              marker = list(size = 5,
+                            color = 'brown',
+                    line = list(color = 'brown1',
+                                width = 2)))
+fig_dist  <- fig_dist %>% layout(title = 'Pudrición vs Distancia',
+                                 yaxis = list(zeroline = FALSE),
+                                 xaxis = list(zeroline = FALSE))
+
+#♣fig_dist  <- fig_dist %>% add_trace(y = ~y,mode='lines')
+fig_dist
+#lines(xv,exp(yv),col="blue")
+```
+
+Note lo extraño que se ve el diagrama de dispersión cuando se tienen los datos de conteo como respuesta. Los valores de la variable respuesta estan en las columnas (porque son todos numeros enteros).
+
+## 14.2 - Análisis de desviación con recuento de datos
+
+En el siguiente ejemplo, la respuesta variable es un recuento de hojas infectadas de papa con $Alternaria~solani$, tomadas al azar de un cultivo en la sabana Cundinamarques. Las variables explicativas son:
+
+Patogeno (logico: verdadero o falso)
+
+Etapa fenológica (Tres niveles: joven, medio, viejo)
+
+Tratamiento presente (Si o no)
+
+Rendimiento (Bajo, no normal y normal)
+
+**https://www.ica.gov.co/getattachment/b2645c33-d4b4-4d9d-84ac-197c55e7d3d0/Manejo-fitosanitario-del-cultiva-de-la-papa-nbsp;-.aspx**
+
+```{r}
+count <- read.delim("D:/Kevin/Trabajos/Diseno de Experimentos/therbook/leaves.txt")
+attach(count)
+names(count)
+```
+
+```{r,include=FALSE}
+leaves <- count$leaves
+Pathogen <- count$Pathogen
+Stage <- count$Stage
+Var <- count$Var
+Yield <- count$Yield
+```
+
+
+Siempre es una buena idea con los datos de recuento tener una idea de la distribución de frecuencia general de los recuentos utilizando la función Table:
+
+```{r}
+table(leaves)
+```
+
+La mayoría de plantas (314) no muestran daño en plantas, y el máximo de 7 fue observado en solo dos plantas.
+
+Se empieza la inspección de la información por tabulación el principal efecto de las medias:
+
+```{r}
+tapply(leaves,Pathogen,mean)
+```
+```{r}
+tapply(leaves,Yield, mean)
+```
+```{r}
+tapply(leaves,Var,mean)
+```
+```{r}
+tapply(leaves,Stage,mean)
+```
+
+Se ve como si las plantas con patógeno substancialmente tiene un recuento de media más grande que los que no lo tienen; Parcelas con rendimiento no normal y bajo tienen un recuento de media más alto que el normal;Se necesita probar si alguna de estas diferencias son significativas y para evaluar si existen interacciones entre las variables explicativas.
+
+```{r}
+model3<-glm(leaves~Pathogen*Var*Stage*Yield,poisson)
+summary(model3)
+```
+
+Como la desviación residua (736.33) es mucho más grande que los grados de libertad (477), indicando sobredisperción; antes de hacer alguna interpretación se debe ajustar el modelo usando el error quasi-Poisson.
+
+```{r}
+model4<-glm(leaves~Pathogen*Var*Stage*Yield,quasipoisson)
+summary(model4)
+```
+
+Lo que primero se debe entender qué son los $NAs$ en la tabla de medias. No hay información en la tabla de datos con lo cual se pueda estimar esta interacción. Hay aparentemente una interacciónde tres vias entre patogeno, etapa y bajo rendimeinto ($p~value~=~0.0424$). Como hay pocos datos para hacer la interacción de 4 vias, se hace una simplificación del modelo, removiendo la interacción de orden más alto.
+
+```{r}
+model5 <- update(model4, ~. -Pathogen:Var:Stage:Yield)
+summary(model5)
+```
+
+
+```{r}
+newYd <- Yield
+newYd <- as.factor(newYd)
+levels(newYd)[c(1,3)] <- "not"
+levels(newYd)
+model15 <- glm(leaves~Pathogen+newYd+Pathogen:newYd,
+               family = quasipoisson)
+summary(model15)
+```
+
+
+Este modelo muestra una interacción muy significativa entre el patógeno y el rendimiento en la determinación del número de hojas dañadas, pero no hay efectos convincentes de la estapa o la variedad. En un caso como este, es útil producir una tabla resumen para resaltar los efectos:
+
+```{r}
+mod_1 <- tapply(leaves,list(Pathogen,Yield),mean)
+mod_1
+```
+
+
+Este modelo muestra la alta interacción significativa entre el patógeno y el rendimiento; el patógeno agrega una media de alrededor de 0.5 hojas dañadas para parecas con rendimiento normal, pero agrega 2.8 hojas dañadas para parcelas con rendimiento bajo.
+
+Es sencillo convertir la tabla de resumen en un diagrama de barras:
+
+```{r,include=FALSE}
+df <- data.frame(Pathogen=rep(c("No","Yes"),each=3),
+                 Yield=rep(c("Low","Notnormal","Normal"),2),
+                 Damage_Leaves=c(0.6893939,0.5436893,0.4184397,3.5142857,2.0270270,0.9523810))
+df
+```
+
+```{r}
+ggplot(data=df, aes(x=Yield, y=Damage_Leaves, fill=Pathogen)) +
+  geom_bar(stat="identity", position=position_dodge())+
+  scale_fill_brewer(palette="Greens")+
+  theme_minimal()
+```
+
+## 14.3 - Análisis de covarianza con recuento de datos
+
+En el siguiente ejemplo la respuesta es un recuento de la cantidad de especies de plantas en parcelas que tienen diferente biomasa (una variable explicativa continua) y la diferencia del pH del suelo (una vaiable categórica con 3 niveles: alto, medio y bajo)
+
+```{r}
+species <- read.delim("D:/Kevin/Trabajos/Diseno de Experimentos/therbook/species.txt")
+attach(species)
+names(species)
+```
+```{r}
+fig_species <- plot_ly(data = species, x = ~Biomass, y = ~Species, color = ~pH)
+fig_species
+```
+Es claro que las especies decaen directamente proporcional con la biomasa, y el ph del suelo tiene una gran efecto sobre las especies; pero entonces ¿la pendiente de la relación entre las especies y la biomasa depende del pH? Las lineas se ven razonablemente paralelas en el gráfico. Esto es una pregunta sobre la interacción de efectos y el análisis de covarianza, los interacción de efectos tiene que ver con las diferencias entre pendientes: 
+
+```{r}
+model7<-glm(Species~ Biomass*pH,poisson)
+summary(model7)
+```
+
+Como se evidencia no se tiene sobredispersión (grados de libertad $>$ desviación residual). Se puede probar la necesidad de diferentes pendientes comparando este modelo máximo (con seis parámetros) con un modelo más simple con diferentes intersecciones pero la misma pendiente (cuatro parámetros):
+
+```{r}
+model8 <- glm(Species~Biomass+pH,poisson)
+summary(model8)
+```
+
+```{r}
+anova(model7,model8,test="Chi")
+```
+
+Las pendientes son significativamente muy diferentes (p = 0.000 33), por lo está justificado en retener los más complicado del modelo1.
+
+Finalmente, se sibuja las líneas ajustadas a través del diagrama de dispersión, usando $predict$. Se necesita especificar valores para todas las variables explicativas en el modelo, a saber, biomasa (una variable continua) y pH del suelo (variable categórica con tres niveles). Primero, la variable continua para el eje x:
+
+```{r}
+xv_1 <- seq(0,10,0.1)
+```
+
+A continuación, se necesita proporcionar un vector de niveles de factor para el pH del suelo y este vector debe tener exactamente la misma longitud como el vector de valores x ($longitud~=~101$). Es más sencillo utilizar los niveles de factor de pH en el orden en que aparecen:
+
+```{r}
+pH <- species$pH
+pH <- as.factor(pH)
+levels(pH)
+```
+Primero se traza la línea para el pH alto, recordando anular ($antilog$) las predicciones:
+
+```{r}
+pHs<-factor(rep("high",101))
+yv_1 <- predict(model7,list(Biomass=xv_1,pH=pHs))
+pHs_1 <-factor(rep("low",101))
+yv_2 <- predict(model7,list(Biomass=xv_1,pH=pHs_1))
+pHs_2 <-factor(rep("mid",101))
+yv_3 <- predict(model7,list(Biomass=xv_1,pH=pHs_2))
+
+plot(Biomass,Species,type="n")
+spp<-split(Species,pH)
+bio<-split(Biomass,pH)
+points(bio[[1]],spp[[1]],pch=16,col="red")
+points(bio[[2]],spp[[2]],pch=16,col="green")
+points(bio[[3]],spp[[3]],pch=16,col="blue")
+legend(x=8,y=45.5,legend=c("high","low","medium"), pch=c(16,16,16),col=c("red","green","blue"),title="pH")
+lines(xv_1,exp(yv_1),col='red')
+lines(xv_1,exp(yv_2),col='green')
+lines(xv_1,exp(yv_3),col='blue')
+```
+
+## 14.4 - Distribución de frecuencias
+
+Aquí hay datos sobre el número de quiebras en 80 distritos. La pregunta es si hay alguna evidencia que algunos distritos muestran un número de casos mayor de lo esperado. ¿Qué esperaríamos? Por supuesto que deberíamos esperar alguna variación, pero ¿cuánto exactamente? Bueno, eso depende de nuestro modelo de proceso. Quizás el modelo más simple es que no pasa absolutamente nada, y que cada caso de quiebra individual es absolutamente independientes unos de otros. Eso lleva a la predicción de que el número de casos por distrito seguirá un proceso de Poisson, una distribución en la que la varianza es igual a la media. Observe lo que muestra de datos.
+
+```{r}
+case.book <- read.csv("D:/Kevin/Trabajos/Diseno de Experimentos/therbook/cases.txt", sep="")
+attach(case.book)
+names(case.book)
+```
+
+Primero se necesita contar el número de distritos sin casos, un caso, dos casos, etc.
+
+```{r}
+frequencies <- table(cases)
+frequencies
+```
+No hubo ningún caso en 34 distritos, pero un distrito tuvo 10 casos. Una buena forma de proceder es comparar nuestra distribución (llamada frecuencias) con la distribución que se observaría si los datos realmente procedieran de una distribución de Poisson como postula nuestro modelo. Podemos usar la función $dpois$ para calcular la densidad de probabilidad de cada una de las 11 frecuencias de 0 a 10 (multiplicamos la probabilidad producida por $dpois$ por la muestra total de 80 para obtener las frecuencias predichas) .Se necesita calcular el número medio de casos por distrito: este es el único parámetro de la distribución de Poisson:
+
+```{r}
+cases <- case.book$cases
+cases <- as.vector(cases)
+mean(cases)
+```
+
+El plan es dibujar dos distribuciones una al lado de la otra, por lo que se configura la región de trazado:
+
+```{r,include=FALSE}
+cases_1 <- dpois(0:10,1.775)*80
+```
+
+
+```{r}
+fig_poi <- plot_ly(y=~frequencies,type = 'bar')
+fig_poi <- fig_poi %>% layout(title='Frecuencias',
+                              xaxis =list(title = "Cases"),
+                              yaxis =list(title = "Frequiencies"))
+fig_poi
+```
+
+```{r}
+fig_poi_1 <- plot_ly(y=~cases_1,type = 'bar')
+fig_poi_1 <- fig_poi_1 %>% layout(title='Poisson',
+                              xaxis =list(title = "Cases"),
+                              yaxis =list(title = "Frequiencies"))
+fig_poi_1
+```
+
+Las distribuciones son muy diferentes: la moda de los datos observados es 0, pero la moda de la distribución de Poisson con la misma media es 1; los datos observados contenían ejemplos de 8, 9 y 10 casos, pero estos serían muy poco probables en un proceso de Poisson. Diríamos que los datos observados están altamente agregados tienen una razón varianza-media mucho mayor que 1 (la distribución de Poisson, por supuesto, tiene una razón varianza-media de 1):
+
+```{r}
+var(cases)/mean(cases)
+```
+
+Entonces, si los datos no se distribuyen según Poisson, ¿cómo se distribuyen? Una buena distribución candidata donde la relación varianza-media es así de grande (alrededor de 3,0) es la distribución binomial negativa (consulte la pág. 315). Esta es una distribución de dos parámetros: el primer parámetro es el número medio de casos (1.775) y el segundo se llama parámetro de agrupamiento, k (mide el grado de agregación en los datos: valores pequeños de k (k <1) muestran una alta agregación, mientras que los valores grandes de k (k> 5) muestran aleatoriedad). Podemos obtener una estimación aproximada de la magnitud de k de
+
+$$\hat k = \frac{\hat x}{S^2-\hat x}$$
+
+Se puede trabajar esto afuera
+
+```{r}
+mean(cases)^2/(var(cases)-mean(cases))
+```
+
+Entonces se trabajaá con k = 0.89. ¿Cómo calular las frecuencias esperadas? La función de densidad para la distribución binomial negativa es $dnbinom$ y tiene tres argumentos: la frecuencia para la que se quiere la probabilidad (en este caso de 0 a 10), el número de éxitos (en este caso 1) y el número medio de casos. (1,775); se multiplica por el número total de casos (80) para obtener las frecuencias esperadas
+
+```{r}
+exp <- dnbinom(0:10,1,mu=1.775)*80
+```
+
+Dibujar una sola figura en la que las frecuencias observadas y esperadas se dibujan una al lado de la otra. El truco consiste en producir un nuevo vector (llamado "both") que sea el doble de largo que los vectores de frecuencia observados y esperados (2 × 11 = 22). Luego, colocar las frecuencias observadas en los elementos impares (usando el módulo 2 para calcular los valores de los subíndices), y las frecuencias esperadas en los elementos pares:
+
+```{r}
+df_both <- data.frame(frequencies,exp)
+df_both
+```
+
+```{r}
+fig_both <- plot_ly(df_both,y=~frequencies,
+                    type = 'bar',name='Observed')
+fig_both <- fig_both %>% add_trace(y=~exp,name='Expected')
+fig_both <- fig_both %>% layout(yaxis = list(title = 'Frequency'))
+
+fig_both
+```
+
+El ajuste a la distribución binomial negativa es mucho mejor que con la distribución de Poisson, especialmente en la cola de la derecha. Pero los datos observados tienen demasiados 0 y muy pocos 1 para ser representados perfectamente por una distribución binomial negativa. Si desea cuantificar la falta de ajuste entre las distribuciones de frecuencia observadas y esperadas, puede calcular Chi cuadro de Pearson $\sum(O-E)^2/E$ basado en el numero de comparaciones que tiene una frecuencia esperada mayor a 4:
+
+```{r}
+exp
+```
+
+Si se acumulan las seis frecuencias más a la derecha, entonces todos los valores de $exp$ serán mayores que 4. Los grados de libertad vienen dados por el número de comparaciones legítimas (6) menos el número de parámetros estimados a partir de los datos (2 en nuestro caso ) menos 1 (para contingencia, porque la frecuencia total debe sumar 80), es decir, 3 grados de libertad. Reducimos las longitudes de los vectores observados y esperados, creando un intervalo superior llamado 5+ para 5' o más":
+
+```{r}
+cs <- factor(0:10)
+levels(cs)[6:11]<-"5+"
+levels(cs)
+```
+
+Ahora haga dos vestores cortos $of$ y $ef$ (para frecuencia $'observada'$ y $'esperada'$)
+
+```{r}
+ef <- as.vector(tapply(exp,cs,sum))
+of <- as.vector(tapply(frequencies,cs,sum))
+```
+
+Finalmente, se puede calcular el valor de chi-cuadrado midiendo la diferencia entre las distribuciones de frecuencia observadas y esperadas, y usar $1-pchisq$ para calcular el valor p:
+
+```{r}
+sum((of-ef)^2/ef)
+1-pchisq(3.594145,3)
+```
+Se concluye que una descripción binomial negativa de estos datos es razonable (las distribuciones observadas y esperadas no son significativamente diferentes, p = 0.31).
+
+## Sobredispersión en modelos logaritmicos-lineales
+
+Los datos analizados en esta sección se refieren a niños de Guateque – Boyaca - Colombia, que fueron clasificados por sexo (con dos niveles: masculino (M) y femenino (F)), cultura (también con dos niveles: Campesino (A) y no (N)), grupo de edad (con cuatro niveles: F0 (primario), F1, F2 y F3) y estado del alumno (con dos niveles: promedio (AL) y lento (SL)). La variable de respuesta es un recuento del número de días ausentes de la escuela en un año escolar en particular (Días).
+
+**http://repositorio.pedagogica.edu.co/bitstream/handle/20.500.12209/947/TO-17751.pdf?sequence=1&isAllowed=y**
+
+```{r}
+data(quine)
+attach(quine)
+names(quine)
+```
+
+```{r}
+datatable(quine,filter='top',class = 'cell-border stripe', options = list(
+  pageLength = 20, autoWidth = TRUE))
+```
+
+Comienza con un modelo log-lineal para los recuentos y se ajusta un modelo máximo que contiene todos los factores y todas sus interacciones:
+
+```{r}
+model9 <- glm(Days~Eth*Sex*Age*Lrn,poisson)
+summary(model9)
+```
+
+A continuación, verifique la desviación residual para ver si hay sobredispersión. Recuerde que la desviación residual debe ser igual a los grados de libertad residuales si el supuesto de errores de Poisson es apropiado. Aquí es 1173,9 sobre 118 d.f., lo que indica una dispersión excesiva por un factor de aproximadamente 10. Esto es demasiado grande para ignorarlo, por lo que antes de embarcarse en la simplificación del modelo, intente un enfoque diferente, utilizando errores de cuasi-Poisson para explicar la dispersión excesiva:
+
+```{r}
+model10 <- glm(Days~Eth*Sex*Age*Lrn,quasipoisson)
+summary(model10)
+```
+
+Observe que ciertas interacciones tienen vacios (mostradas por filas con NA). Estos no se han estimado debido a que faltan combinaciones de nivel de factor, como lo indican los ceros en la siguiente tabla:
+
+```{r}
+ftable(table(Eth,Sex,Age,Lrn))
+```
+
+La mayor parte de esto ocurre porque los aprendices lentos nunca entran en el Form 3.
+
+Desafortunadamente, el citerio de información de Akaike no está definido para este modelo, por lo que no se puede automatizar la simplificación usando $step$ o $stepAIC$. Se necesita hacer la simplificación del modelo a mano, por lo tanto, recordando hacer pruebas F (no chi-cuadrado) debido a la dispersión vertical. Aquí está el último paso de la simplificación antes de obtener el modelo mínimo adecuado. ¿Se necesita la interacción de aprendizaje de la edad?
+
+```{r}
+model11_1 <- glm(Days~Eth*Sex*Age*Lrn,quasipoisson)
+model11_2 <- update(model11_1, ~. -Eth:Sex:Age:Lrn)
+model11_3 <- update(model11_2, ~. -Eth:Age:Lrn)
+model11_4 <- update(model11_3, ~. -Sex:Age:Lrn)
+model11 <- update(model11_4, ~. -Eth:Age:Sex)
+model12 <- update(model11,~. - Age:Lrn)
+anova(model11,model12,test="F")
+```
+
+Entonces, aquí está el modelo mínimo adecuado con errores de cuasi-Poisson:
+
+```{r}
+summary(model12)
+```
+
+Existe una interacción de tres vías muy significativa entre origen étnico, sexo y dificultad de aprendizaje; Los niños no aborígenes de aprendizaje lento tenían más probabilidades de estar ausentes que los niños no aborígenes sin dificultades de aprendizaje.
+
+```{r}
+ftable(tapply(Days,list(Eth,Sex,Lrn),mean))
+```
+
+Sin embargo, tenga en cuenta que entre los alumnos sin dificultades de aprendizaje son los niños aborígenes los que faltan más días, y son las niñas aborígenes con dificultades de aprendizaje las que tienen la tasa más alta de ausentismo en general.
+
+## 14.6 - Errores binomiales negativos
+
+En lugar de utilizar errores de cuasi-Poisson (como se indicó anteriormente), se podría utilizar un modelo binomial negativo. Esto está en la biblioteca $MASS$ e involucra la función $glm.nb$. El modelado procede exactamente de la misma manera que con un típico
+GLM:
+
+```{r}
+model.nb1 <- glm.nb(Days~Eth*Sex*Age*Lrn)
+summary(model.nb1,cor=F)
+```
+
+La salida es ligeramente diferente a la de un GLM convencional: ve el parámetro binomial negativo estimado (aquí llamado Theta, pero conocido como k, e igual a 1.928) y su error estándar aproximado (0.269) y 2 veces la probabilidad logarítmica (contraste esto con la desviación residual de nuestro modelo cuasi-Poisson, que fue 1301.1; ver arriba). Tenga en cuenta que la desviación residual en el modelo binomial negativo (167,45) no es 2 veces la probabilidad logarítmica.
+
+Una ventaja del modelo binomial negativo sobre el cuasi-Poisson es que se puede automatizar la simplificación del modelo con $stepAIC$:
+
+```{r}
+model.nb2 <- stepAIC(model.nb1)
+summary(model.nb2,cor=F)
+```
+
+Retomar la simplificación del modelo donde lo deja $AIC$:
+
+```{r}
+model.nb3 <- update(model.nb2,~. - Sex:Age:Lrn)
+anova(model.nb3,model.nb2)
+```
+ 
+Debido a que no se toma en cuenta, el sexo marginalmente significativo por edad por interacción de aprendizaje no sobrevive a una prueba de eliminación (p = 0.058), ni tampoco por origen étnico por edad por aprendizaje (p = 0.115) ni edad por aprendizaje (p = 0.150)
+
+```{r}
+model.nb4<-update(model.nb3,~. - Eth:Age:Lrn)
+anova(model.nb3,model.nb4)
+```
+
+```{r}
+model.nb5<-update(model.nb4,~. - Age:Lrn)
+anova(model.nb4,model.nb5)
+```
+
+```{r}
+summary(model.nb5,cor=F)
+```
+
+El modelo mínimo adecuado, por lo tanto, contiene exactamente los mismos términos que se obtuvieron con cuasi-Poisson, pero los niveles de significancia son más altos (por ejemplo, la interacción de tres vías tiene p = 0.002 66 en comparación con p = 0.005 73). es necesario trazar el modelo para verificar los supuestos:
+
+```{r}
+plot(model.nb5)
+```
+
+La varianza se comporta bien y los residuos están distribuidos casi normalmente. La combinación de valores p bajos y la capacidad de utilizar stepAIC hace que glm.nb sea una función de modelado muy útil para datos de recuento como estos.
+
+
+# Cap 16 - Proporción de información
+
+Una clase importante de problemas implica contar datos en proporciones como:
+
+* Estudios sobre tasas de mortalidad.
+
+* Tasas de infección de enfermedades.
+
+* Respuestas a cuestionarios.
+
+* Proporción que responde al tratamiento clínico.
+
+* Proporción que admite intenciones de voto particulares.
+
+* Proporciones de sexos.
+
+* Datos sobre la respuesta proporcional a un tratamiento experimental.
+
+Lo que todos estos tienen en común es que se sabe cuántos de los objetos experimentales están en una categoría (muertos, insolventes, masculinos o infectados) y también se sabe cuántos hay en otra (vivos, solventes, femeninos o no infectados). Esto contrasta con los datos del recuento de Poisson, donde se sabía cuántas veces ocurrió un evento, pero no cuántas veces no ocurrió.
+
+Procesos de modelo que involucran variables de respuesta proporcionales en R especificando un modelo lineal generalizado con familia = binomio. La única complicación es que mientras que con los errores de Poisson podrían simplemente especificar $family = poisson$, con los errores binomiales se debe dar el número de fracasos así como el número de éxitos en una variable de respuesta de dos vectores. Para hacer esto, une dos vectores usando $cbind$ en un solo objeto, y, que comprende el número de éxitos y el número de fracasos. El denominador binomial, n, es la muestra total, y:
+
+$$number~of~failures~<-~binomial~denominator~-~number~of~successes\\
+y~<-~cbind(number~of~successes, number~of~failures)$$
+
+La forma antigua de modelar este tipo de datos era utilizar el porcentaje de mortalidad como variable de respuesta. Hay cuatro problemas con esto:
+
+* Los errores no se distribuyen normalmente.
+
+* La varianza no es constante.
+
+* La respuesta está limitada (por 1 arriba y 0 abajo).
+
+* Al calcular el porcentaje, se pierde información sobre el tamaño de la muestra, n, a partir de la cual se estimó la proporción.
+
+R lleva a cabo una regresión ponderada, utilizando los tamaños de muestra individuales como ponderaciones y la función de enlace logit para garantizar la linealidad. Hay algunos tipos de datos proporcionales, como la cobertura porcentual, que se analizan mejor utilizando modelos lineales convencionales (asumiendo errores normales y varianza constante) después de la transformación de arcoseno. La variable de respuesta, y, medida en radianes,es $$sin^{-1}\sqrt{0.01*p}$$, donde $p$ es el porcentaje de covertura. Sin embargo, si la variable de respuesta toma la forma de un cambio porcentual en alguna medición continua (como el cambio porcentual en el peso al recibir una dieta en particular), entonces, en lugar de transformar los datos en arcoseno, generalmente se trata mejor con:
+
+* Análisis de covarianza, utilizando el peso final como variable de respuesta y el peso inicial como covariable.
+
+* Especificando la variable de respuesta como una tasa de crecimiento relativa, medida como log (peso final / peso inicial)
+
+Ambos pueden analizarse como modelos lineales con errores normales sin más transformación.
+
+## 16.1 - Análisis de información en una y dos proporciones
+
+Para comparaciones de una proporción binomial con una constante, use $binom.test$. Para comparar dos muestras de datos proporcionales, utilice $prop.test$. Los métodos de este capítulo son necesarios solo para modelos más complejos de datos proporcionales, incluidas las tablas de regresión y contingencia, donde se utilizan $glm$.
+
+## 16.2 - Recuento de datos en proporciones
+
+Las transformaciones tradicionales de los datos proporcionales eran arcoseno y probit. La transformación de arcoseno se encargó de la distribución del error, mientras que la transformación probit se utilizó para linealizar la relación entre el porcentaje de mortalidad y la dosis logarítmica en un bioensayo. No hay nada de malo en estas transformaciones y están disponibles dentro de R, pero a menudo es preferible un enfoque más simple, y es probable que produzca un modelo que sea más fácil de interpretar.
+
+La principal dificultad con el modelado de datos proporcionales es que las respuestas están estrictamente limitadas. No hay forma de que el porcentaje de muerte sea mayor al 100% o menor al 0%. Pero si se utilizan técnicas simples como la regresión o el análisis de covarianza, entonces el modelo ajustado podría predecir fácilmente valores negativos o valores superiores al 100%, especialmente si la varianza era alta y muchos de los datos estaban cerca de 0 o cerca del 100%. .
+
+La curva logística se usa comúnmente para describir datos sobre proporciones porque, a diferencia del modelo de línea recta, tiene asíntotas en 0 y 1, por lo que no se pueden predecir proporciones negativas y respuestas de más del 100%. A lo largo de esta discusión se utilizará p para describir la proporción de individuos observados que responden de una manera determinada. Debido a que gran parte de su jerga se deriva de la teoría del juego, los estadísticos llaman a estos éxitos, aunque para un demógrafo que mida las tasas de mortalidad esto puede parecer algo macabro. La proporción de individuos que responden de otras formas (fallas del estadístico) es, por lo tanto, $1 - p$, y llamará a esta proporción q. La tercera variable es el tamaño de la muestra, n, a partir de la cual se estimó $p$ (este es el denominador binomial y el número de intentos del estadístico).
+
+Un punto importante sobre la distribución binomial es que la varianza no es constante. De hecho, la varianza de una distribución binomial con media np es: 
+
+$$s^2 = npq$$
+
+Entonces la varianza cambia con la varianza de la sioguiente forma:
+
+```{r,warning= F}
+media <- rnorm(300000)
+
+varianza <- dnorm(media)
+
+ggplot(data.frame(x = media, y = varianza)) + 
+  aes(x = x, y = y) +
+geom_point() + 
+  labs(x = "Media", y = "Varianza")
+```
+
+La varianza es baja cuando p es muy alta o muy baja, y la varianza es mayor cuando $p = q = 0.5$. A medida que p se hace más pequeño, la distribución binomial se acerca cada vez más a la distribución de Poisson. Puede ver por qué esto es así al considerar la fórmula para la varianza del binomio (arriba). Recuerde que para Poisson, la varianza es igual a la media: $s^{2}= np$. Ahora, a medida que $p$ se hace más pequeño, $q$ se acerca cada vez más a 1, por lo que la varianza del binomio converge a la media:
+
+$$s^{2}=npq \approx np ~~~~~~~~~~~~~~~~(q\approx1)$$
+
+## 16.3 - Posibilidades
+
+El modelo logístico para **p** en función de **x** viene dado por:
+
+$$p=\frac{e^{a+bx}}{1+e^{a+bx}}$$
+
+y no hay premios por darse cuenta de que el modelo no es lineal. Pero si x = –∞ entonces **p = 0**, y si **x = + ∞** entonces **p = 1**, entonces el modelo está estrictamente acotado. Si **x = 0**, entonces $p=\frac{e^{a}}{1+e^{a}}$. El truco de linealizar el modelo logístico en realidad implica una transformación muy simple. Es posible que se haya encontrado con la forma en que los corredores de apuestas especifican las probabilidades citando las probabilidades en contra de que un caballo en particular gane una carrera (podrían dar probabilidades de 2 a 1 en un caballo razonablemente bueno o de 25 a 1 en un extraño). Esta es una forma bastante diferente de presentar información sobre probabilidades a la que están acostumbrados los científicos. Por lo tanto, cuando el científico podría establecer una proporción de 0,333 (una probabilidad de ganar en tres), la casa de apuestas daría probabilidades de 2 a 1 (según el conteo de resultados: un éxito contra dos fracasos). En símbolos, esta es la diferencia entre el científico que indica la probabilidad p y la casa de apuestas que indica las probabilidades **p / q**. Ahora, si se toman las probabilidades **p / q** y se sustituyen en la fórmula de la logística, se obtiene:
+
+$$\frac{p}{q}=\frac{e^{a+bx}}{1+e^{a+bx}}*[1-\frac{e^{a+bx}}{1+e^{a+bx}}]^{-1}$$
+el cual se ve terrorifico. Pero con un poco de aritmetica se ve:
+
+$$\frac{p}{q}=\frac{e^{a+bx}}{1+e^{a+bx}}*[1-\frac{e^{a+bx}}{1+e^{a+bx}}]^{-1}=e^{a+bx}$$
+
+Tomar registros naturales y recordar que $ln(e^x)=x$ simplificará aún más las cosas, de modo que
+
+$$ln(\frac{p}{q})=a+bx$$
+
+Esto da un predictor lineal, $a + bx$, no para p sino para la transformación logit de p, a saber, $ln (\frac{p}{q})$. En la jerga de R, el logit es la función de enlace que relaciona el predictor lineal con el valor de **p**. Aquí se muestran p como función de **x** (panel izquierdo) y **logit (p)** como función de **x** (panel derecho) para el modelo logístico con a = 1 yb = 0,1:
+
+```{r}
+X <- seq(-60,60,by = 0.2)
+length(X)
+P <- pnorm(X, mean = 2.5, sd = 2)
+logit <- seq(-6,6,by=0.02)
+length(logit)
+par(mfrow=c(1,2))
+plot(x=X,y=logit,ylab="logit = log(p/q)")
+plot(x=X,y=P)
+```
+
+En esta etapa, podría preguntarse: "¿por qué no simplemente hacer una regresión lineal de $ln (\frac{p}{q})$ contra la variable explicativa **x**?" GLM con errores binomiales tiene tres grandes ventajas aquí:
+
+* Permite la varianza binomial no constante.
+
+* Se trata del hecho de que los logits para **ps** cercanos a 0 o 1 son infinitos.
+
+* Permite diferencias entre los tamaños de las muestras mediante regresión ponderada.
+
+## 16.4 Sobredispersión y prueba de hipótesis
+
+Que los errores se distribuyan binomialmente es una suposición, no un hecho. Cuando hay sobredispersión, esta suposición es incorrecta y hay que lidiar con ella.
+
+Todos los diferentes procedimientos estadísticos que se han cumplido en capítulos anteriores también se pueden utilizar con datos sobre proporciones. Se pueden realizar análisis factoriales de varianza, regresión múltiple y una variedad de modelos en los que se ajustan diferentes líneas de regresión en cada uno de varios niveles de uno o más factores. La única diferencia es que evalúan la importancia de los términos sobre la base de chi-cuadrado: el aumento en la desviación escalada que resulta de la eliminación del término del modelo actual.
+
+El punto importante a tener en cuenta es que la prueba de hipótesis con errores binomiales es menos clara que con errores normales. Si bien la aproximación de chi-cuadrado para los cambios en la desviación escalada es razonable para muestras grandes (es decir, más de aproximadamente 30), es más deficiente con muestras pequeñas. Lo más preocupante es el hecho de que se desconoce el grado en que la aproximación es satisfactoria. Esto significa que debe ejercerse un cuidado considerable en la interpretación de las pruebas de hipótesis sobre parámetros, especialmente cuando los parámetros son marginalmente significativos o cuando explican una fracción muy pequeña de la desviación total. Con errores binomiales o de Poisson, no se puede esperar proporcionar valores p exactos para nuestras pruebas de hipótesis.
+
+Cuando se ha obtenido el modelo mínimo adecuado, la desviación escalada residual debe ser aproximadamente igual a los grados de libertad residuales. La sobredispersión ocurre cuando la desviación residual es mayor que los grados de libertad residuales. Hay dos posibilidades: o el modelo está mal especificado o la probabilidad de éxito, $p$, no es constante dentro de un nivel de tratamiento dado. El efecto de variar p aleatoriamente es aumentar la varianza binomial de $npq$ a:
+
+$$s^2=npq+n(n-1)\sigma^2$$
+
+Dando lugar a una gran desviación residual. Esto ocurre incluso para modelos que encajarían bien si la variación aleatoria se especificara correctamente.
+
+Una solución simple es asumir que la varianza no es $npq$ sino $npq\phi$, donde $\phi$ es un parámetro de escala desconocido ($\phi> 1$). Obtenemos una estimación del parámetro de escala dividiendo el chi-cuadrado de Pearson por los grados de libertad y usamos esta estimación de $\phi$ para comparar las desviaciones escaladas resultantes. Para lograr esto, se usa family = quasibinomial en lugar de family = binomial cuando hay dispersión excesiva.
+
+Los puntos más importantes a enfatizar en el modelado con errores binomiales son los siguientes:
+
+* Cree un objeto de dos columnas para la respuesta, usando **cbind** para unir los dos vectores que contienen los conteos de éxito y fracaso.
+
+* Verifique la sobredispersión (desviación residual mayor que los grados residuales de libertad) y corríjala utilizando family = quasibinomial en lugar de family = binomial si es necesario.
+
+* Recuerde que no obtiene valores p exactos con errores binomiales; las aproximaciones de chi-cuadrado son correctas para muestras grandes, pero las muestras pequeñas pueden presentar un problema.
+
+* Los valores ajustados son dos conjuntos de recuentos, como la variable de respuesta.
+
+* El predictor lineal está en logits (el logaritmo de las probabilidades = $ln (\frac{p}{q})$).
+
+* Puede volver a transformar de logits (z) a proporciones (p) por p = 1 / [1 + 1 / exp (z)].
+
+## 16.5 - Aplicaciones
+
+Puede realizar tantos tipos de modelado en un GLM como en un modelo lineal. A continuación se muestran ejemplos de:
+
+* Regresión con errores binomiales (variables explicativas continuas).
+
+* Análisis de desviación con errores binomiales (variables explicativas categóricas).
+
+* Análisis de covarianza con errores binomiales (ambos tipos de variables explicativas).
+
+## 16.5.1 Regresión logistica con errores binomiales
+
+Este ejemplo se refiere a las proporciones de sexos en los insectos (la proporción de todos los individuos que son machos). En la especie en cuestión, se ha observado que la proporción de sexos es muy variable y se organizó un experimento para ver si la densidad de población estaba involucrada en la determinación de la fracción de machos.
+
+```{r}
+numbers <- read.csv("D:/Kevin/Trabajos/Diseno de Experimentos/therbook/sexratio.txt", header = T,sep = "")
+attach(numbers)
+head(numbers)
+```
+
+Ciertamente, parece que hay proporcionalmente más machos en alta densidad, pero debería graficar los datos como proporciones para ver esto con mayor claridad:
+
+```{r}
+Densidad <- numbers$density
+Hembras <- numbers$females
+Machos <- numbers$males
+p <- Machos/(Machos+Hembras)
+log_den <- log(Densidad)
+dat_ins <- data.frame(Densidad,Hembras,Machos,p,log_den)
+
+fig_den <- plot_ly(data = dat_ins,x = Densidad,y = p)
+fig_den <- fig_den %>% layout(
+                        xaxis = list(title = "Densidad"),
+                        yaxis = list(title = "Proporción de Machos"))
+
+fig_den
+```
+
+```{r}
+fig_den_1 <- plot_ly(data = dat_ins,x = log_den,y = p)
+fig_den_1 <- fig_den_1 %>% layout(
+                        xaxis = list(title = "log(Densidad)"),
+                        yaxis = list(title = "Proporción de Machos"))
+
+fig_den_1
+```
+
+Evidentemente, es probable que una transformación logarítmica de la variable explicativa mejore el ajuste del modelo. lo verá en un momento.
+
+La pregunta es si el aumento de la densidad de población conduce a un aumento significativo en la proporción de machos en la población o, más brevemente, si la proporción de sexos depende de la densidad. Ciertamente, se ve en la trama como si lo fuera.
+
+La variable de respuesta es un par de recuentos coincidentes que deseamos analizar como datos proporcionales usando un GLM con errores binomiales. Primero, usamos cbind para unir los vectores de conteos masculinos y femeninos en un solo objeto que será la respuesta en nuestro análisis:
+
+```{r}
+y <- cbind(Machos,Hembras)
+```
+
+Esto significa que $y$ se interpretará en el modelo como la proporción de todos los individuos que eran hombres. El modelo se especifica así:
+
+```{r}
+model_16 <- glm(y~Densidad,binomial)
+```
+
+Esto dice que el objeto llamado modelo obtiene un modelo lineal generalizado en el que $y$ (la proporción de sexos) se modela como una función de una única variable explicativa continua (llamada densidad), utilizando una distribución de error de la familia binomial. La salida se ve así:
+
+```{r}
+summary(model_16)
+```
+
+La tabla del modelo tiene el mismo aspecto que para una regresión sencilla. El primer parámetro en la tabla de Coeficientes es la intersección y el segundo es la pendiente del gráfico de la proporción de sexos contra la densidad de población. La pendiente es significativamente más pronunciada que cero (proporcionalmente más machos con mayor densidad de población; $p = 6,81 × 10-12$), pero hay una sobredispersión sustancial (la desviación residual = 22,091 es mucho mayor que la d.f. residual = 6). Podemos ver si la transformación logarítmica de la variable explicativa mejora esto:
+
+```{r}
+model17 <- glm(y~log_den,binomial)
+summary(model17)
+```
+
+Esta es una gran mejora, por lo que se adoptará. En el modelo con log (densidad) no hay evidencia de sobredispersión (desviación residual = 5.67 en 6 d.f.), mientras que la falta de ajuste introducida por la curvatura en el primer modelo causó una sobredispersión sustancial (desviación residual = 22.09 en 6 d.f.).
+
+La verificación del modelo implica el uso de un graficador para el modelo 17. Como verá, no hay un patrón en los residuales contra los valores ajustados y la gráfica normal es razonablemente lineal. Punto no. 4 es muy influyente (tiene una gran distancia de Cook), pero el modelo sigue siendo significativo con este punto omitido.
+
+Se concluye que la proporción de insectos que son machos aumenta significativamente al aumentar la densidad, y que el modelo logístico se linealiza por transformación logarítmica de la variable explicativa (densidad de población). Termina dibujando la línea ajustada a través del diagrama de dispersión:
+
+```{r}
+xv_4 <- seq(0,6,0.01)
+yv_4 <- predict(model17,list(exp(xv_4)),type = "response")
+plot(log_den,p)
+#lines(xv_4,yv_4)
+#df_gg <- data.frame(xv_4,yv_5)
+#ggplot(dat_ins, aes(x = log_den, y = p)) + 
+ # geom_point() + 
+  #geom_line(color ='red',data=df_gg, aes(x=xv_4,y=yv_5))+
+  #labs(x="log(Densidad",y="Proporción machos")
+
+```
+
+Nótese el uso de type = "response" para retrotransformar de la escala logit a la escala de proporción en forma de S.
+
+## 16.5.2 - Estimando LD50 y LD90 desde la información de biomasa
+
+Los datos consisten en el número de muertos y el tamaño del lote inicial para cinco dosis de aplicación de plaguicidas, y se desea saber qué dosis mata al 50% de los individuos (o al 90% o 95%, según sea necesario). El problema estadístico complicado es que se está usando un valor de $y$ (50% muerto) para predecir un valor de $x$ (la dosis relevante) y calcular un error estándar en el eje x.
+
+```{r}
+data_1 <- read.delim("D:/Kevin/Trabajos/Diseno de Experimentos/therbook/bioassay.txt",header = T)
+attach(data_1)
+names(data_1)
+```
+
+La regresión logistica es llevada a cabo en el camino usual
+
+```{r}
+y_1 <- cbind(dead,batch-dead)
+model18 <- glm(y_1~log(dose),binomial)
+```
+
+Entoces la función $dose.p$ de la librería MASS se corre con el objeto del modelo, especificando las proporciones "matadas" para los cuales se quiere el $log(doses)$ predicho ($p$=0.5 es el predeterminado para LD50)
+
+```{r}
+dose.p(model18,p=c(0.5,0.9,0.95))
+```
+
+A pesar de la etiqueta "Dosis", la salida muestra los registros de las dosis asociadas con muertes de LD50, LD90 y LD95, junto con sus errores estándar.
+
+## 16.5.3 - Proporción de información con variables explicativas categóricas
+
+El siguiente ejemplo se refiere a la germinación de semillas de dos genotipos de la planta parásita **Orobanche** y dos extractos de plantas hospedantes (frijol y pepino) que se utilizaron para estimular la germinación. Es un análisis factorial bidireccional de la desviación.
+
+```{r,warning=F,message=F}
+germination <- read.delim("D:/Kevin/Trabajos/Diseno de Experimentos/therbook/germination.txt")
+attach(germination)
+names(germination)
+count_1 <- germination$count
+```
+
+El recuento es el número de semillas que germinaron de un lote de $tamaño = muestra$. Entonces, el número que no germinó es $muestra - recuento$, y se construye el vector de respuesta así:
+
+```{r}
+y_2 <- cbind(count_1,sample-count_1)
+```
+
+Cada uno de las variables explicativas categóricas tiene 2 niveles
+
+```{r}
+Orobanche <- as.factor(Orobanche)
+levels(Orobanche)
+```
+
+```{r}
+extract <- as.factor(extract)
+levels(extract)
+```
+
+Se quiere contrastar la hipótesis de que no existe interacción entre el genotipo Orobanche (a73 o a75) y el extracto vegetal (frijol o pepino) en la tasa de germinación de las semillas. Esto requiere un análisis factorial usando el operador asterisco $*$ como este:
+
+```{r}
+model_19 <- glm(y_2~Orobanche*extract,binomial)
+summary(model_19)
+```
+
+A primera vista, parece que hay una interacción muy significativa ($p = 0,0111$). Pero es necesario comprobar que el modelo es sólido. Lo primero que hay que comprobar es la sobredispersión. La desviación residual es 33.278 en 17 d.f., por lo que el modelo está bastante sobredispersado:
+
+```{r}
+33.278/17
+```
+
+El factor de sobredispersión es casi 2. La forma más sencilla de tener esto en cuenta es utilizar lo que se llama un "parámetro de escala empírica" para reflejar el hecho de que los errores no son binomiales como se suponía, sino que eran mayores que esto (es decir, dispersos en exceso) en un factor de 1,9576. Se reajusta el modelo usando errores cuasi-binomiales para dar cuenta de la sobredispersión:
+
+```{r}
+model_20 <- glm(y_2~Orobanche*extract,quasibinomial)
+model_21 <- glm(y_2~Orobanche+extract,quasibinomial)
+```
+
+La única diferencia es que se usa una prueba F en lugar de una prueba de chi-cuadrado para comparar los modelos original y simplificado porque ahora se han estimado dos parámetros del modelo (la media más el parámetro de escala empírica):
+
+```{r}
+anova(model_20,model_21,test = "F")
+```
+
+ahora se observa que la interacción no es significativa ($p=0.081$). No hay evidencia convicente de que los diferentes genotipos de **Orobanche**, responda diferente ante los dos extractos de las plantas.
+
+El siguiente paso es ver si es posible una mayor simplificación del modelo:
+
+```{r}
+anova(model_21,test="F")
+```
+
+```{r}
+model_22 <- glm(y_2~extract,quasibinomial)
+anova(model_21,model_22,test="F")
+```
+
+No hay justificación suficiente para retener a **Orobanche** dentro del modelo. Entonces la minima adecuación del modelo contiene solo dos parámetros:
+
+```{r}
+coef(model_22)
+```
+
+¿Qué significan exactamente estos dos números? Recuerde que los coeficientes son del predictor lineal. Están en la escala transformada, así que debido a que estamos usando errores cuasi-binomiales, están en logits ($ln (\frac{p}{1 - p})$). Para convertirlos en las tasas de germinación para los dos extractos de plantas se requiere un pequeño cálculo. Para pasar de un logit $x$ a una proporción $p$, es necesario calcular
+
+$$p=\frac{1}{1+1/e^x}$$
+
+Entonces el primer valor de $x$ es -0.5122, por lo que se calcula
+
+```{r}
+1/(1+1/exp(-0.5122))
+```
+
+Esto dice que la tasa de germinación media de las semillas con el primer extracto de planta (frijol) fue del 37%. ¿Qué pasa con el parámetro de extracción (1.0574)? Recuerde que con las variables explicativas categóricas los valores de los parámetros son diferencias entre medias. Entonces, para obtener la segunda tasa de germinación, agregue 1.057 a la intersección antes de la transformación inversa:
+
+```{r}
+1/(1+1/exp(-0.5122+1.0574))
+```
+Esto dice que la tasa de germinación fue casi el doble (63%) con el segundo extracto de planta (pepino). Evidentemente se quiere generalizar este proceso, y también agilizar los cálculos de las proporciones medias estimadas. Puede usar $predict$ para ayudar aquí, porque $type = "response"$ hace predicciones en la escala transformada hacia atrás automáticamente:
+
+```{r}
+tapply(predict(model_22,type = "response"),extract,mean)
+```
+
+Es interesante comparar estas cifras con los promedios de las proporciones brutas. Primero es necesario calcular la proporción de germinación, p, en cada muestra:
+
+```{r}
+p_1 <- count_1/sample
+```
+
+Luego se pueden encontrar las tasas de germinación promedio de cada extracto:
+
+```{r}
+tapply(p_1,extract,mean)
+```
+Ve que esto da diferentes respuestas. No muy diferente en este caso, pero diferente de todos modos. La forma correcta de promediar los datos de proporción es sumar los recuentos totales para los diferentes niveles de resumen, y solo entonces convertirlos en proporciones:
+
+```{r}
+tapply(count_1,extract,sum)
+```
+
+Esto significa que 148 semillas germinaron con extracto de frijol y 276 con pepino. Pero, ¿cuántas semillas estuvieron involucradas en cada caso?
+
+```{r}
+tapply(sample,extract,sum)
+```
+
+Esto significa que 395 semillas fueron tratadas con extracto de frijol y 436 semillas fueron tratadas con pepino. Entonces, las respuestas que queremos son 148/395 y 276/436 (es decir, las proporciones medias correctas). Podemos automatizar el cálculo de esta manera:
+
+```{r}
+as.vector(tapply(count_1,extract,sum))/as.vector(tapply(sample,extract,sum))
+```
+
+**Estas son las proporciones medias correctas que fueron producidas por el GLM. La moraleja aquí es que se calcula el promedio de proporciones usando recuentos totales y muestras totales y no promediando las proporciones brutas.**
+
+## Promediando Proporciones
+
+aquí un ejemplo de lo que NO hay que hacer. Se tienen 4 proporciones
+
+$$0.2,~0.17,~0.2,~0.53$$
+
+Así que seguramente es solo sumarlos y dividirlos por 4. Esto da $1.1 / 4 = 0.275$. ¡Incorrecto! Y no por un poquito. Es necesario observar los recuentos en los que se basaron las proporciones. Estos resultan ser:
+
+$$1/5,~1/6,~2/10,~53/100$$
+
+La forma correcta de promediar las proporciones es sumar el recuento total de éxitos ($1 + 1 + 2 + 53 = 57$) y dividirlo por el número total de muestras ($5 + 6 + 10 + 100 = 121$). La proporción media correcta es $57/121 = 0,4711$. Esto es casi el doble de nuestra respuesta incorrecta (arriba).
+
+## 16.7 - Resumen del modelado con recuento de datos de proporciones
+
+* Cree un vector de respuesta de dos columnas que contenga los éxitos y los fracasos.
+
+* Use $glm$ con $family = binomial$ (puede omitir $family =$).
+
+* Ajuste el modelo máximo.
+
+* Prueba de sobredispersión.
+
+* Si encuentra una dispersión excesiva, utilice errores cuasibinomiales en lugar de binomiales.
+
+* Comience la simplificación del modelo eliminando los términos de interacción.
+
+* Eliminar efectos principales no significativos
+
+* Utilice plot para obtener sus diagnósticos de verificación de modelo.
+
+* Realice una transformación inversa usando $predict$ con la opción $type = "response"$ para obtener medias.
+
+## Análisis de covarianza con información binomial
+
+Pasemos ahora a un ejemplo sobre la floración en cinco variedades de plantas perennes. Los individuos replicados en un diseño completamente aleatorizado se rociaron con una de seis dosis de una mezcla controlada de promotores del crecimiento. Después de 6 semanas, las plantas se calificaron como con o sin floración. El recuento de individuos en floración constituye la variable de respuesta. Este es un ANCOVA porque tiene variables explicativas tanto continuas (dosis) como categóricas (variedad). Se usa regresión logística porque la variable de respuesta es un recuento (flores) que se puede expresar como una proporción (flores / número).
+
+```{r,warning=F,message=F}
+props <- read.delim("D:/Kevin/Trabajos/Diseno de Experimentos/therbook/flowering.txt",header = T)
+attach(props)
+names(props)
+```
+
+```{r}
+y_3 <- cbind(flowered,number-flowered)
+pf <- flowered/number
+pfc <- split(pf,variety)
+dc <- split(dose,variety)
+dc
+pfc
+```
+
+```{r}
+plot(dose,pf,type="n",ylab="Proportion flowered")
+points(jitter(dc[[1]]),jitter(pfc[[1]]),pch=21,col="blue",bg="red")
+points(jitter(dc[[2]]),jitter(pfc[[2]]),pch=21,col="blue",bg="green")
+points(jitter(dc[[3]]),jitter(pfc[[3]]),pch=21,col="blue",bg="yellow")
+points(jitter(dc[[4]]),jitter(pfc[[4]]),pch=21,col="blue",bg="green3")
+points(jitter(dc[[5]]),jitter(pfc[[5]]),pch=21,col="blue",bg="brown")
+
+## Cambiar gráfico
+```
+
+Tenga en cuenta el uso de split para separar las diferentes variedades, de modo que podamos trazarlas con diferentes símbolos, y de jitter para evitar que los valores repetidos se oculten entre sí. Es evidente que existe una diferencia sustancial entre las variedades de plantas en su respuesta al estimulante de la floración. El modelado procede de la forma habitual. Comenzamos ajustando el modelo máximo con diferentes pendientes e intersecciones para cada variedad (estimando diez parámetros en total):
+
+```{r}
+model_23 <- glm(y_3~dose*variety,binomial)
+summary(model_23)
+```
+
+El modelo exhibe una sobredispersión sustancial, pero esto probablemente se deba a una mala selección del modelo en lugar de una variabilidad adicional no medida. Investiguemos esto trazando las curvas ajustadas a través del diagrama de dispersión.
+
+```{r}
+# gráfico p.p. 664
+```
+
+Como puede ver, el modelo es razonable para dos de los genotipos (A y E, representados por líneas rojas y marrones, respectivamente), moderado para un genotipo (C, amarillo) pero muy pobre para dos de ellos, B (inferior, línea verde claro) y D (línea superior, verde oscuro). Para ambos últimos, el modelo sobreestima en gran medida la proporción de floración a dosis cero, y para el genotipo B parece haber cierta inhibición de la floración a la dosis más alta porque el gráfico cae del 90% de floración a la dosis 16 a solo el 50% a la dosis. 32. La variedad D parece ser asintótica con menos del 100% de floración.
+
+```{r}
+tapply(pf,list(dose,variety),mean)
+```
+
+Estos fallos del modelo deberían centrar la atención para el trabajo futuro. La moraleja es que el hecho de que tengamos datos proporcionales no significa que los datos necesariamente estarán bien descritos por el modelo logístico. Por ejemplo, para describir la respuesta del genotipo B, el modelo debería tener una joroba, en lugar de una asíntota en p = 1 para dosis grandes. Es esencial observar de cerca los datos, tanto con gráficos como con tablas, antes de aceptar el resultado del modelo. La elección del modelo es muy importante. La logística fue una mala elección para dos de las cinco variedades en este caso.
+
+## 16.9 - Convirtiendo tablas de contingencia complejas a proporciones
+
+En esta sección se muestra cómo eliminar la necesidad de todas las variables molestas que están involucradas en el modelado de tablas de contingencia complejas (los totales de filas y columnas que deben incluirse en todos los modelos). Puede hacer esto cuando la respuesta puede reformularse como una proporción binaria (una opción de entre dos contingencias). Por ejemplo, en el caso de las lagartijas de Schoener, que resultó tan difícil de analizar como una tabla de contingencia compleja (ver p. 610), se puede trabajar con la proporción de todas las lagartijas que son Anolis grahamii como variable de respuesta, en lugar de analizar los recuentos de los números de A. grahamii y A. opalinus por separado. Esto tiene la gran ventaja de no requerir que ninguna de las variables molestas se incluya en el modelo. Sin embargo, la técnica no funcionaría si tuviéramos tres especies de lagartos. Entonces tendría que ceñirse al complejo modelo de tablas de contingencia.
+
+```{r,warning=F,message=F}
+lizards <- read.delim("D:/Kevin/Trabajos/Diseno de Experimentos/therbook/lizards.txt",header = T)
+attach(lizards)
+names(lizards)
+```
+
+```{r}
+head(lizards)
+```
+
+Primero, es necesario estar absolutamente seguro de que todas las variables explicativas estén exactamente en el mismo orden para ambas especies de lagartos. La razón de esto es que se van a unir los recuentos de una de las especies de lagartos en la mitad del marco de datos que contiene los recuentos de otras especies y todas las variables explicativas. Cualquier error aquí sería desastroso porque el recuento estaría alineado con la combinación incorrecta de variables explicativas, y el análisis sería incorrecto y carecería de sentido.
+
+```{r}
+species <- as.factor(lizards$species)
+sun <- as.factor(lizards$sun)
+height <- as.factor(lizards$height)
+perch <- as.factor(lizards$perch)
+time <- as.factor(lizards$time)
+
+sorted <- lizards[order(species,sun,height,perch,time),]
+head(sorted)
+```
+
+A continuación, es necesario extraer la mitad superior de este marco de datos.
+
+```{r}
+short <- sorted[1:24,]
+```
+
+Tenga en cuenta que esta operación ha perdido todos los datos de A. opalinus. Además, el nombre de la variable de la izquierda, n, ya no es apropiado. Es el recuento de $A. grahamii$, por lo que deberíamos renombrarlo Ag, digamos (con la intención de agregar otra columna llamada Ao a su debido tiempo para contener los recuentos de $A. opalinus$):
+
+```{r}
+names(short)[1] <- "Ag"
+names(short)
+```
+
+La variable de la derecha, especie, es redundante ahora (todas las entradas son $A. grahamii$), por lo que debería eliminarla:
+
+```{r}
+short <- short[,-6]
+head(short)
+```
+
+Los recuentos de cada fila de A. opalinus están en la variable llamada n en la mitad inferior del marco de datos llamado $sorted$. Los extraemos así:
+
+```{r}
+sorted$n[25:48]
+```
+
+La idea es crear un nuevo marco de datos con estos recuentos de $A. opalinus$ alineados junto con los recuentos coincidentes de $A.grahamii$:
+
+```{r}
+new.lizards <- data.frame(sorted$n[25:48],short)
+```
+
+La primera variable necesita un nombre informativo, como $Ao$:
+
+```{r}
+names(new.lizards)[1] <- "Ao"
+head(new.lizards)
+```
+
+Eso completa la edición del marco de datos. Tenga en cuenta, sin embargo, que tenemos tres marcos de datos, todas de configuraciones diferentes, pero cada una contiene los mismos nombres de variable (sol, altura, posición y tiempo): observe los objetos () y busque (). Necesitamos hacer algunas tareas de limpieza:
+
+```{r,message=F,warning=F}
+lizards <- as.factor(lizards)
+df_lizards <- as.data.frame(lizards)
+#detach(df_lizards)
+rm(short,sorted)
+attach(new.lizards)
+```
+
+## 16.9.1 - Analizando lagartijas de Schoener como una información de proporción
+
+Con los preliminares anteriores, aquí están los nombres de las variables:
+
+```{r}
+names(new.lizards)
+```
+
+La variable respuesta es un obejto de dos columnas el cual contiene el recuento de las dos especies.
+
+```{r}
+y_4 <- cbind(Ao,Ag)
+```
+
+Empiece por ajustar el modelo saturado que contiene todas las interacciones posibles:
+
+```{r,warning=F,message=F}
+sun <- as.vector(sun)
+height <- as.vector(height)
+time <- as.vector(time)
+perch <- as.factor(perch)
+y_4 <- as.factor(y_4)
+model_24 <- glm(y_4 ~ (time*sun*height*perch),binomial)
+```
+
+Como no hay variables molestas, podemos usar $step$ directamente para comenzar la simplificación del modelo:
+
+```{r}
+model_25 <- step(model_24)
+```
+
+Se ha visto que AIC es muy generoso al dejar términos en el modelo que eliminaríamos sin piedad. Para empezar, necesitamos probar si hubiéramos mantenido las dos interacciones de tres vías y las cinco
+interacciones bidireccionales:
+
+```{r}
+model_26 <- update(model_25,~.-height:perch:time)
+model_27 <- update(model_25,~.-sun:height:perch)
+anova(model_25,model_26,test = "Chi")
+```
+
+fue cerca pero no es significante
+
+```{r}
+anova(model_25,model_27,test = "Chi")
+```
+
+No, no mantendría ninguna de esas interacciones de tres vías. ¿Qué pasa con las interacciones bidireccionales? es necesario comenzar con un modelo base más simple que el modelo 25:
+
+```{r}
+model_28 <- glm(y_4~(sun+height+perch+time)^2-sun:time,binomial)
+```
+
+Debe eliminar cada una de las interacciones bidireccionales por separado, comparándolas con el modelo_28 que contiene todas las interacciones bidireccionales:
+
+```{r}
+model_29 <- update(model_28,~.-sun:height)
+anova(model_28,model_29,test = "Chi")
+```
+
+```{r}
+model_30 <- update(model_28,~.-sun:perch)
+anova(model_28,model_30,test = "Chi")
+```
+
+```{r}
+model_31 <- update(model_28,~.-height:perch)
+anova(model_28,model_31,test = "Chi")
+```
+
+```{r,message=F,warning=F}
+model_32 <- update(model_28,~.-time:perch)
+anova(model_28,model_32,test = "Chi")
+```
+
+```{r,message=F,warning=F}
+model_33 <- update(model_28,~.-time:height)
+anova(model_28,model_33,test = "Chi")
+```
+
+Por lo tanto, no necesitamos ninguna de las interacciones bidireccionales. ¿Qué pasa con los efectos principales?
+
+```{r}
+model_34 <- glm(y_4~sun+height+perch+time,binomial)
+summary(model_34)
+```
+
+Todos los efectos principales son importantes y, por tanto, deben mantenerse. Solo un último punto: es posible que no necesitemos los tres niveles para el tiempo, ya que el resumen sugiere que el mediodía y la mañana no son significativamente diferentes (diferencia del parámetro de 0,9639 - 0,7368 = 0,2271, con un error estándar de la diferencia de 0,29). Los agrupamos en un nuevo factor llamado t2:
+
+```{r,message=F,warning=F}
+t3 <- time
+time <- as.factor(time)
+levels(t3)[c(2)] <- "other"
+levels(t3)[c(3)] <- "other1"
+levels(t3)
+```
+
+```{r}
+model_35 <- glm(y_4~sun+height+perch+t3,binomial)
+anova(model_34,model_35,test = "Chi")
+```
+
+Un modelo con solo dos horas del día no es significativamente peor que un modelo con tres.
+
+```{r}
+summary(model_35)
+```
+
+Todos los parámetros son significativos, por lo que este es el modelo mínimo adecuado. No hay evidencia de sobredispersión. Solo hay cinco parámetros y el modelo no contiene variables molestas (compárelo con el modelo de tabla de contingencia masiva summary.lm (modelo1)). La interpretación ecológica es sencilla: las dos especies de lagartos difieren significativamente en sus nichos en todos los ejes de nichos que se midieron. Sin embargo, no hubo interacciones significativas (no sucedía nada sutil, como cambiar el tamaño de las perchas en diferentes momentos del día).
+
+
+# Capítulo 26 - Spatial statistics - Estadística espacial (pp 835)
+
+Hay tres tipos de problemas que puede abordar con las estadísticas espaciales:
+
+* procesos puntuales (ubicaciones y patrones espaciales de individuos)
+
+* Mapas de una variable respuesta continua (kriging)
+
+* Respuestas espaciales explicitas afectadas por la indetidad, tamaño y proximidad de los vecinos.
+
+## 26.1 Procesos puntuales
+
+Hay tres clases amplias de patrón espacial en un continuo desde la regularidad completa (hexágonos espaciados uniformemente donde cada individuo está a la misma distancia de su vecino más cercano) hasta la agregación completa (todos los individuos agrupados en un solo grupo): los llamamos regulares, aleatorios y patrones agregados y se ven así:
+
+```{r}
+regular_x <- c(2,2,3,3,4,4,5,5,6,6,7,7)
+regular_y <- c(3,7,2,5,3,7,2,5,3,7,2,5)
+
+random_x <- runif(14,min = 1,max = 7)
+random_y <- runif(14,min = 1,max = 7)
+
+agg_x <- c(2,2.5,2.5,2.5,3,4,4.5,6,6.5,6.5,6.5,6.7,7,7,7)
+agg_y <- c(2,1,2,3,2.5,4.5,4,4.5,4,4.7,5,5,4,4.7,5)
+
+par(mfrow=c(1,3))
+plot(regular_x,regular_y,ylim = c(0,8),xlim = c(1,8),xlab = "",ylab = "",cex=2,pch=16, main = "Regular")
+plot(random_x,random_y,ylim = c(0,8),xlim = c(1,8),xlab = "",ylab = "",cex=2,pch=16, main = "Random")
+plot(agg_x,agg_y,ylim = c(0,8),xlim = c(1,8),xlab = "",ylab = "",cex=2,pch=16, main = "aggregated")
+```
+
+En su forma más simple, los datos consisten en conjuntos de coordenadas $x$ y $y$ dentro de algún marco de muestreo, como un cuadrado o un círculo, en el que se han mapeado los individuos. La primera pregunta es a menudo si existe alguna evidencia que permita el rechazo de la hipótesis nula de aleatoriedad espacial completa (RSC). En un patrón aleatorio, la distribución de cada individuo es completamente independiente de la distribución de todos los demás. Los individuos no se inhiben ni se promueven entre sí. En un patrón regular, los individuos están más espaciados que en uno aleatorio, presumiblemente debido a algún mecanismo (como la competencia) que elimina a los individuos que están demasiado juntos. En un patrón agregado, los individuos están más agrupados que en uno aleatorio, presumiblemente debido a algún proceso como la reproducción con dispersión limitada, o debido a la heterogeneidad espacial subyacente (por ejemplo, parches buenos y parches malos).
+
+Los recuentos de individuos dentro de áreas de muestra (cuadrantes) se pueden analizar comparando la distribución de frecuencia de los recuentos con una distribución de Poisson con la misma media. Los patrones espaciales agregados (en los que la varianza es mayor que la media) a menudo se describen bien mediante una distribución binomial negativa con parámetro de agregación k (consulte la pág. 315). El principal problema con los recuentos basados en cuadrantes es que dependen en gran medida de la escala. El mismo patrón espacial podría parecer regular cuando se analiza con cuadrantes pequeños, agregado cuando se analiza con cuadrantes de tamaño mediano, pero aleatorio cuando se analiza con cuadrantes grandes.
+
+Las medidas de distancia son de dos tipos generales: medidas desde individuos hasta sus vecinos más cercanos y medidas desde puntos aleatorios hasta el individuo más cercano. Recuerde que el individuo más cercano a un punto aleatorio no es un individuo seleccionado al azar: este protocolo favorece la selección de individuos aislados e individuos en los bordes de los grupos.
+
+En otras circunstancias, es posible que esté dispuesto a dar por sentada la existencia de parches y a realizar un análisis más sofisticado de los atributos espaciales de los parches en sí, su tamaño medio y la variación de tamaño, la variación espacial en el espaciado de parches. de diferentes tamaños, etc.
+
+## 26.1.1 Puntos aleatorios en un círculo
+
+El círculo está especificado por las coordenadas $x$ y $y$ de su centro y por el radio. Podemos calcular las coordenadas de la circunferencia de un círculo de radio r, con su centro ubicado en $x = y = 0$ así:
+
+```{r}
+#x_c <- r*sin(angle)
+#y_c <- r*cos(angle)
+```
+
+donde el ángulo varía entre 0 y 2π radianes. Hay dos formas de generar puntos aleatorios dentro de este círculo: una es asumir que el círculo es un objetivo y que estoy apuntando al centro; y el otro es asumir que estoy cortando un parche circular de un mar de puntos espacialmente independientes. En el primer caso, podríamos generar un ángulo aleatorio uniforme, luego generar una distancia aleatoria distribuida uniformemente a lo largo de este radio. En general, estos puntos se agruparán alrededor del centro del círculo porque los radios aleatorios están más densamente agrupados aquí.
+
+```{r}
+point <- function(r) {
+angle <- runif(1)*2*pi
+length <- runif(1)*r
+x_1 <- length*sin(angle)
+y_1 <- length*cos(angle)
+return (data.frame(x_1,y_1))
+}
+```
+
+El este y el norte del centro del círculo son e0 y n0 respectivamente, el radio es r y queremos trazar 1000 puntos aleatorios dentro del círculo:
+
+```{r}
+e0 <- 10
+n0 <- 10
+plot(e0,n0,ylab="",xlab="",ylim=c(0,2*n0),xlim=c(0,2*e0),type="n")
+n <- 1000
+r <- 10
+for (i in 1:n) {
+a <- point(r)
+e <- e0+a[1]
+n <- n0+a[2]
+points(e,n,pch=16,col="cyan")
+}
+```
+
+Si, en lugar de trazar los puntos aleatorios, dibuja líneas desde el centro del círculo hasta los puntos aleatorios, puede ver exactamente por qué este algoritmo da puntos aleatorios que se agrupan alrededor del centro.
+
+```{r}
+e0 <- 10
+n0 <- 10
+plot(e0,n0,ylab="",xlab="",ylim=c(0,2*n0),xlim=c(0,2*e0),type="n")
+n <- 1000
+r <- 10
+for (i in 1:n) {
+a <- point(r)
+e <- e0+a[1]
+n <- n0+a[2]
+lines(c(e0,e),c(n0,n),col= "red")
+}
+```
+
+Una pregunta diferente es el caso del "cortador de galletas". Si lanzo un cuadrante circular en un mapa espacialmente uniforme de puntos aleatorios, ¿cómo se ve la distribución de mis puntos seleccionados al azar? Aquí está el pseudocódigo:
+
+* Hacer un mapa cuadrado de n puntos aleatorios (este y norte uniformes).
+
+* Haga un polígono para describir la circunferencia de su cuadrante de muestreo circular.
+
+* Coloque el cuadrante en el mapa cuadrado y use la función de maptools para preguntar si todos los puntos del mapa están o no dentro de su círculo (la función se llama point.in.polygon y devuelve un 1 para VERDADERO y un cero para FALSO).
+
+* Utilice el vector de salida llamado quería para seleccionar los puntos que están en su círculo.
+
+Aquí está el código R para 10000 puntos aleatorios en una región cuadrada cuyo lado tiene una longitud de 10:
+
+```{r}
+n <- 10000
+side <- 10
+library(maptools)
+space <- cbind((runif(n)*side),(runif(n)*side))
+plot(space)
+circle <- function(e,n,r) {
+angle <- seq(0,2*pi,2*pi/360)
+x - r*sin(angle)
+y - r*cos(angle)
+return (cbind((x+e),(y+n)))
+}
+```
+
+Seleccione los puntos aleatorios en un circulo de radio 1 y centrado en (8,8)
+
+```{r,message=F,warning=F}
+n <- 10000
+side <- 16
+library(maptools)
+
+space <- cbind((runif(n)*side),(runif(n)*side))
+
+plot(space)
+
+circle <- function(e,n,r) {
+          angle <- seq(0,2*pi,2*pi/360)
+          x <- r*sin(angle)
+          y <- r*cos(angle)
+          return (cbind((x+e),(y+n)))
+}
+
+xc <- 8
+yc <- 8
+rc <- 1
+outline <- circle(xc,yc,rc)
+wanted <- point.in.polygon(space[,1],
+                           space[,2],
+                           outline[,1],
+                           outline[,2])
+
+points(space[,1][wanted==1],
+       space[,2][wanted==1], 
+       col="blue",pch=16)
+
+xc <- 5
+yc <- 5
+rc <- 2
+outline<-circle(xc,yc,rc)
+wanted<-point.in.polygon(space[,1],
+                         space[,2],
+                         outline[,1],
+                         outline[,2])
+points(space[,1][wanted==1],
+       space[,2][wanted==1],
+       col="red",pch=16)
+```
+
+Como se pretendía, no hay agrupación de estos puntos alrededor de los centros de los círculos. Si el círculo representa una pequeña fracción del área total del cuadrado, entonces este método es muy ineficiente.
+
+## 26.2 - Vecinos cercanos
+
+Supongamos que se nos ha planteado el problema de dibujar líneas para unir los pares de vecinos más cercanos de cualquier conjunto de puntos ($x, y$) que se mapean en dos dimensiones. Hay tres pasos para la informática: 
+
+necesitamos
+
+* calcular la distancia a cada vecino;
+
+* identificar la distancia vecina más pequeña para cada individuo;
+
+* Utilice estas distancias mínimas para identificar a todos los vecinos más cercanos.
+
+Comenzamos generando una distribución espacial aleatoria de 100 individuos simulando sus coordenadas $x$ y $y$ a partir de una distribución de probabilidad uniforme:
+
+```{r}
+x_v <- runif(100)
+y_v <- runif(100)
+dat_vc <- data.frame(x_v,y_v)
+```
+
+El parámetro de gráficos pty = "s" hace que el área de trazado sea cuadrada, como si quisiéramos para este un mapa como este:
+
+```{r}
+ggplot(data=dat_vc,aes(x_v,y_v))+
+  geom_point(color="brown")+
+  xlab("x")+
+  ylab("y")
+```
+
+Calcular las distancias es sencillo: para cada individuo usamos Pitágoras para calcular la distancia a todas las demás plantas. La distancia entre dos puntos con coordenadas (x1, y1) y (x2, y2) es d:
+
+$$d=\sqrt{(y_2-y_1)^2+(x_2-x_1)^2} $$
+
+Se escribe una función para esto:
+
+```{r}
+distance <- function(x1,y1,x2,y2) sqrt((x2-x1)^2+(y2-y1)^2)
+```
+
+Ahora recorremos cada individuo $i$ y calculamos un vector de distancias, d, de todos los demás individuos. La distancia del vecino más cercano es el valor mínimo de $d$, y la identidad del vecino más cercano, nn, se encuentra usando la función which, which ($d == min (d [-i])$), que da el subíndice del mínimo valor de $d$ (el [-i] es necesario para excluir la distancia 0 que resulta de la distancia del i-ésimo individuo de sí mismo). Aquí está el código completo para calcular las distancias vecinas más cercanas, r, y las identidades, nn, para las 100 individios en el mapa:
+
+```{r}
+r <- numeric(100)
+nn <- numeric(100)
+d <- numeric(100)
+
+for (i in 1:100) {
+for (k in 1:100) d[k] <- distance(x_v[i],y_v[i],x_v[k],y_v[k])
+r[i] <- min(d[-i])
+nn[i] <- which(d==min(d[-i]))
+}
+```
+
+Ahora dibuje las distancias dentro del gráfico
+
+```{r}
+par(pty="s")
+plot(x_v,y_v,pch=21,bg="red")
+for (i in 1:100) lines(c(x_v[i],x_v[nn[i]]),c(y_v[i],y_v[nn[i]]),col="green")
+```
+
+
+Tenga en cuenta que cuando dos puntos están muy juntos y cada uno es el vecino más cercano del otro, puede parecer que un solo punto no está unido a ningún vecino. La siguiente tarea es averiguar cuántos de los individuos están más cerca del borde del área que de su vecino más cercano. Debido a que los márgenes inferior e izquierdo están en y = 0 y x = 0 respectivamente, la coordenada y de cualquier punto da la distancia desde el borde inferior del área y la coordenada x da la distancia desde el margen izquierdo. Solo necesitamos calcular la distancia de cada individuo desde los márgenes superior y derecho del área:
+
+```{r}
+topd <- 1-y_v
+rightd <- 1-x_v
+```
+
+Ahora usamos la función mínima paralela $pmin$ para calcular la distancia al margen más cercano para cada uno de los 100 individuos:
+
+```{r}
+edge <- pmin(x_v,y_v,topd,rightd)
+```
+
+Finalmente, contamos el número de casos en los que la distancia al borde es menor que la distancia al vecino más cercano:
+
+```{r}
+sum(edge<r)
+```
+
+Se identifican estos puntos dentro del mapa, encerrandolos en rojo
+
+```{r}
+plot(x_v,y_v,pch=16)
+id <- which(edge<r)
+points(x_v[id],y_v[id],col="red",cex=1.5,lwd=2)
+```
+
+Es la distancia vertical u horizontal al borde la que se ha utilizado para identificar estos puntos, por lo que algunos de ellos miran sospechosamente cerca de sus vecinos (por ejemplo, en la esquina inferior izquierda). Los efectos de borde son potencialmente muy importantes en los procesos de puntos espaciales, especialmente cuando hay pocos individuos o el área mapeada es larga y delgada (en lugar de cuadrada o circular). Excluir a los individuos que están más cerca del borde que de su vecino más cercano reduce la distancia media del vecino más cercano:
+
+```{r}
+id <- which(edge<r)
+mean(r)
+mean(r[-id])
+```
+
+## 26.2.1 Teselación
+
+El procedimiento de dividir una superficie bidimensional en un mosaico al reducir a la mitad la distancia entre pares de puntos vecinos se llama teselación. Hay una función para hacer esto en el paquete tripack de Albrecht Gebhardt:
+
+```{r}
+x_ts <-runif(100)
+y_ts <-runif(100)
+dat_ts <- data.frame(x_ts,y_ts) 
+```
+
+Cree un objeto Voronoi (aquí llamado mapa) aplicando la función llamada voronoi.mosaic a los vectores de las coordenadas $x$ y $y$.
+
+```{r}
+mapa <- voronoi.mosaic(x_ts,y_ts)
+```
+
+empiece produciendo un diagrama de puntos aleatorios en verde:
+
+```{r}
+ggplot(dat_ts,aes(x_ts,y_ts))+
+  geom_point(color="green")+
+  xlab("x")+
+  ylab("y")
+```
+
+```{r}
+plot(x_ts,y_ts,pch=16,col="green")
+plot.voronoi(mapa,pch=16,add=T)
+```
+
+Como puede ver, es relativamente inusual que los puntos estén en el "centro de gravedad" de su parche en mosaico. Cada nodo (círculo negro) es un centro circuncírculo de algún triángulo de la triangulación de Delaunay.
+
+## 26.3 - Prueba para aleatorización espacial
+
+Clark y Evans (1954) dan una prueba muy simple de aleatoriedad espacial. Suponiendo firmemente que conoce la densidad de población de los individuos, $\rho$ (generalmente no lo sabe, y necesitaría estimarlo de forma independiente), entonces la distancia media esperada al vecino más cercano es:
+
+$$E(r)=\frac{\sqrt{\rho}}{2}$$
+
+En nuestro ejemplo tenemos 100 individuos en un cuadrado unitario, entonces $\rho = 0.01$ y $E (r) = 0.05$. La distancia media real al vecino más cercano fue:
+
+```{r}
+mean(r)
+```
+
+lo cual está muy cerca de la expectativa: esta es claramente una distribución aleatoria de individuos (como la construimos). Un índice de aleatoriedad viene dado por la razón $\frac{\bar{r}}{E(r)}=\frac{2\bar{r}}{\sqrt{\rho}}$. Esto toma el valor 1 para patrones aleatorios, más de 1 para patrones regulares (espaciados) y menos de 1 para patrones agregados.
+
+Un problema con tales estimaciones de patrón espacial de primer orden (incluidas medidas como la relación varianza-media) es que no pueden dar una idea de la forma en que cambia la distribución espacial dentro de un área.
+
+## 26.3.1
+
+Las propiedades de segundo orden de un proceso de puntos espaciales describen la forma en que las interacciones espaciales cambian a través del espacio. Estas son medidas computacionalmente intensivas que toman un rango de distancias dentro del área, calculan una medida de patrón, luego trazan un gráfico de la función contra la distancia, para mostrar cómo la medida del patrón cambia con la escala. La medida de segundo orden más utilizada es la función K, que se define como:
+
+$$K(d)=\frac{1}{\lambda}E[número~de~puntos\leq distancia~d~de~un~punto~arbitrario]$$
+
+donde $\lambda$ es el número medio de puntos por unidad de área (la intensidad del patrón). Si no hay dependencia espacial, entonces el número esperado de puntos que están dentro de una distancia $d$ de un punto arbitrario es $\pi d2$ veces la densidad media. Entonces, si la densidad media es de 2 puntos por metro cuadrado ($\lambda = 2$), entonces el número esperado de puntos dentro de un radio de 5 m es $\lambda \pi d2 = 2 × \pi × 52 = 50\pi = 157.1$. Si hay agrupamiento, entonces esperamos un exceso de puntos a distancias cortas (es decir, $K (d)> \pi d2$ para d pequeña). Del mismo modo, para un patrón espaciado regularmente, esperamos un exceso de distancias largas y, por lo tanto, pocos individuos a distancias cortas (es decir, $K (d) <\pi d2$). La K de Ripley (publicada en 1976) se calcula de la siguiente manera:
+
+$$\hat{K}(d)=\frac{1}{n^2}|A|\sum \sum_{i\neq j}{\frac{I_d(d_{ij})}{w_{ij}}}$$
+
+Aquí n es el número de puntos en la región A con área |A|, y $d_{ij}$ son las distancias entre puntos (la distancia entre los puntos $i$ y $j$, para ser precisos). Para tener en cuenta los efectos de borde, el modelo incluye el término $w_{ij}$, que es la fracción del área, centrada en $i$ y que pasa por $j$, que se encuentra dentro del área A (todas las $w_{ij}$ son 1 para puntos que se encuentran muy lejos de los bordes de la zona). Id ($d_{ij}$) es una función indicadora para mostrar qué puntos se deben contar como vecinos en este valor de $d$: toma el valor 1 si $d_{ij}\leq d$ y cero en caso contrario (es decir, los puntos con $d_{ij} > d$ se omiten de la suma). La medida del patrón se obtiene trazando $\hat{K} (d)$ contra $d$. Luego, esto se compara con la curva que se observaría bajo una aleatoriedad espacial completa (es decir, una gráfica de $\pi d2$ contra $d$). Cuando se produce la agrupación, $K (d)> \pi d2$ y la curva se encuentra por encima de la curva de CSR, mientras que los patrones regulares producen una curva por debajo de la curva de CSR. Puede ver por qué necesita la corrección de bordes con este sencillo experimento de simulación. Para el individuo número 1, con coordenadas (x1, y1), calcule las distancias a todos los demás individuos, usando la función $distance$ que escribimos anteriormente (p. 830):
+
+```{r}
+distances <- numeric(100)
+for(i in 1:100) distances[i] <- distance(x_v[1],y_v[1],x_v[i],y_v[i])
+```
+
+Ahora averigüe cuántos otros individuos se encuentran a una distancia d de este individuo. Tomemos como ejemplo $d = 0.1$.
+
+```{r}
+sum(distances<0.1)-1
+```
+
+Había otros cuatro individuos dentro de una distancia $d = 0.1$ del primer individuo (la distancia 0 de sí mismo se incluye en la suma, por lo que tenemos que corregir esto restando 1). El siguiente paso es generalizar el procedimiento de este individuo a todos los individuos. Hacemos una matriz bidimensional llamada dd para contener todas las distancias de cada individuo (filas) a cada otro individuo (columnas):
+
+```{r}
+dd <- numeric(10000)
+dd <- matrix(dd,nrow=100)
+```
+
+La matriz de distancias se calcula dentro de los bucles tanto para el individuo ($j$) como para el vecino ($i$) así:
+
+```{r}
+for (j in 1:100) {for(i in 1:100) dd[j,i] <- distance(x_v[j],y_v[j],x_v[i],y_v[i])}
+```
+
+Alternativamente, puede usar $sapply$ con una función anónima como esta, que tiene la ventaja de que no necesitamos preparar la matriz dd por adelantado:
+
+```{r}
+dd <- sapply(1:100,function (i,j=1:100) distance(x_v[j],y_v[j],x_v[i],y_v[i]))
+```
+
+Debemos comprobar que el número de individuos dentro de 0.1 del individuo 1 sigue siendo 4 bajo esta nueva notación. Tenga en cuenta el uso de subíndices en blanco [1,] para significar "todas las personas en la fila número 1":
+
+```{r}
+sum(dd[1,]<0.1)-1
+```
+
+Está bien. Queremos calcular la suma de esta cantidad sobre todos los individuos, no solo el número individual
+
+```{r}
+sum(dd<0.1)-100
+```
+
+Esto significa que hay 270 casos en los que otros individuos se cuentan dentro de $d = 0.1$ de los individuos focales. A continuación, cree un vector que contenga un rango de distancias diferentes, $d$, sobre el cual queremos calcular $K (d)$ contando el número de individuos dentro de la distancia d, sumados a todos los individuos:
+
+```{r}
+d <- seq(0.01,1,0.01)
+```
+
+Para cada una de estas distancias, necesitamos calcular el número total de vecinos de todos los individuos. Entonces, en lugar de 0.1 (en la suma, arriba), necesitamos poner cada uno de los valores $d$ por turno. El conteo de individuos será un vector de longitud 100 (uno por cada $d$):
+
+```{r}
+count <- numeric(100)
+```
+
+Calcula la cuenta para cada distancia $d$:
+
+```{r}
+for (i in 1:100) count[i] <- sum(dd<d[i])-100
+```
+
+El recuento esperado aumenta con d como $\pi d2$, por lo que escalamos nuestro recuento dividiendo por el cuadrado del número total de individuos $n2 = 1002 = 10000$:
+
+```{r}
+K <- count/10000
+```
+
+Finalmente, trace el gráfico $K$ contra $d$:
+
+No es sorprendente que cuando muestreamos el área completa (d = 1), contamos a todos los individuos en cada vecindario (K = 1). Para CSR, el gráfico debe seguir πd2, por lo que agregamos una línea para mostrar esto:
+
+```{r,message=F,warning=F}
+plot(d,K,type="l",col="black",ylim=c(0,0.8))
+lines(d,pi*d^2,col="blue")
+```
+
+Hasta aproximadamente $d = 0.2$, la concordancia entre las dos líneas es razonablemente buena, pero para distancias más largas nuestro algoritmo cuenta muy pocos vecinos. Esto se debe a que gran parte del área escaneada alrededor de los individuos marginales es invisible, ya que se encuentra fuera del área de estudio (puede que haya individuos por ahí, pero nunca lo sabremos). Este modelo simple demuestra que la corrección de los bordes es una parte fundamental de la $K$ de Ripley. 
+
+Afortunadamente, no tenemos que escribir una función para calcular un valor corregido para $K$; está disponible como $Kfn$ en la biblioteca $spatial$ incorporada. Aquí lo usamos para analizar el patrón de árboles en el marco de datos llamado $pines$. La función de biblioteca ppinit lee los datos de un archivo de biblioteca llamado $pines.dat$ que se almacena en el directorio espacial / ppdata. Luego lo convierte en una lista con los nombres $\$x$, $\$y$ y $\$area$. La primera fila del archivo contiene el número de árboles (71), la segunda fila tiene el nombre del conjunto de datos ($pines$), La primera fila del archivo contiene el número de árboles (71), la segunda fila tiene el nombre del conjunto de datos (pinos), la tercera fila tiene los cuatro límites de la región más el factor de escala (0, 96, 0, 100 , 10 de modo que las coordenadas de x inferior y superior se calculan como 0 y 9,6, y las coordenadas de y inferior y superior son 0 y 10).  Las filas restantes del archivo de datos contienen las coordenadas xey para cada árbol individual, y estas se convierten en una lista de valores $x$ y una lista separada de valores $y$. Necesita conocer estos detalles sobre la estructura de los archivos de datos para poder utilizar estas funciones de biblioteca con sus propios datos (consulte la p. 845).
+
+```{r}
+pines <- ppinit("pines.dat")
+```
+Primero, configure el área de trazado con dos marcos cuadrados:
+
+```{r}
+windows(7,4)
+par(mfrow=c(1,2),pty="s")
+```
+A la izquierda, haz un mapa usando las ubicaciones xey de los árboles, y a la derecha haz una gráfica de Let) (la medida del patrón) contra la distancia:
+
+```{r}
+par(mfrow=c(1,2),pty="s")
+plot(pines,pch=16, col="blue")
+plot(Kfn(pines,5),type="s",xlab="distance",ylab="L(t)")
+lims <- Kenvl(5,100,Psim(71))
+lines(lims$x,lims$lower,lty=2,col="red")
+lines(lims$x,lims$upper,lty=2,col="red")
+```
+
+Existe una sugerencia de que a distancias relativamente pequeñas (alrededor de 1 más o menos), los árboles se distribuyen con bastante regularidad (más espaciados que aleatorios), porque la gráfica de L (t) contra la distancia cae por debajo de la envolvente inferior de la línea CSR ( debería estar entre los dos límites en toda su extensión si hubiera RSE). El mecanismo subyacente a esta regularidad espacial (por ejemplo, reclutamiento o mortalidad no aleatorios, competencia entre árboles en crecimiento o ausencia de azar subyacente en el sustrato) debería investigarse en detalle. Con un patrón agregado, la línea caería por encima del sobre superior
+
+### Métodos basados en cuadrantes
+
+Otro enfoque para probar la aleatoriedad espacial es contar el número de individuos en cuadrantes de diferentes tamaños. Aquí, los cuadrantes tienen un área de 0.01, por lo que el número esperado por cuadrante es 1. Anteriormente, generamos 100 coordenadas aleatorias para $x$ y $y$:
+
+```{r}
+x_q <- runif(100)
+y_q <- runif(100)
+plot(x_q,y_q,pch=16,col="red")
+grid(10,10,lty=1)
+```
+
+Tenga en cuenta que la función $grid$ no ha hecho exactamente lo que pretendíamos (las cuadrículas no están exactamente en las marcas de verificación). Para contar el número de individuos en cada una de las celdas del mapa, el truco consiste en usar cut para convertir las coordenadas $x$ y $y$ del mapa en números de bin (entre 1 y 10 para el tamaño del cuadrante que hemos dibujado aquí). Para lograr esto, los puntos de ruptura son generados por la secuencia (0,1,0.1):
+
+```{r}
+x_t <- cut(x_q,seq(0,1,0.1))
+y_t <- cut(y_q,seq(0,1,0.1))
+```
+
+Esto crea vectores de subíndices enteros entre 1 y 10 para $x_t$ y $y_t$. Ahora todo lo que tenemos que hacer es usar la tabla para contar el número de individuos en cada celda (es decir, en cada combinación de $x_t$ e $y_t$):
+
+```{r}
+count_q <- as.vector (table(x_t,y_t))
+table(count_q)
+```
+
+Esto muestra que 39 celdas están vacías, 1 celda tenía cinco individuos, pero ninguna celda contenía seis o más individuos. Ahora necesitamos ver cómo se vería esta distribución bajo una hipótesis nula particular.
+
+$$P(x)=\frac{e^{-\lambda}\lambda^x}{x!}$$
+
+Tenga en cuenta que la media depende del tamaño del cuadrante que hemos elegido. Con 100 individuos en toda el área, el número esperado en cualquiera de nuestras 100 celdas, λ, es 1.0. Por lo tanto, las frecuencias esperadas de conteos entre 0 y 5 están dadas por
+
+```{r}
+(expected <- 100*exp(-1)/sapply(0:5,factorial))
+```
+
+El ajuste entre observado y esperado es casi perfecto (como deberíamos esperar, por supuesto, habiendo generado el patrón aleatorio nosotros mismos). En la p. Se muestra una prueba de la significancia de la diferencia entre una distribución de frecuencia observada y esperada.
+
+### Patrones agregados y datos de recuento de cuadrantes
+
+A continuación se muestra un ejemplo de un análisis basado en cuadrantes de un patrón espacial agregado. Comenzamos produciendo un mapa de los árboles, luego usamos $abline$ en lugar $grid$) para asegurarnos de que las líneas estén exactamente donde queremos que estén:
+
+```{r,warning=F,message=F}
+trees <- read.delim("D:/Kevin/Trabajos/Diseno de Experimentos/therbook/trees.txt",header = T)
+attach(trees)
+names(trees)
+```
+
+```{r}
+x_trees <- trees$x
+y_trees <- trees$y
+
+plot(x_trees,y_trees,pch=16,col="blue")
+abline(v=seq(0,1,0.1),col="lightgray",lty=1)
+abline(h=seq(0,1,0.1),col="lightgray",lty=1)
+```
+
+Cortamos los datos y tabulamos los recuentos:
+
+```{r}
+x_t_1 <- cut(x_trees,10)
+y_t_1 <- cut(y_trees,10)
+count_t_1 <- as.vector(table(x_t_1,y_t_1))
+table(count_t_1)
+```
+
+Hay cuadrantes con hasta 8 individuos y, a pesar de que el número medio es mayor a 3 individuos por cuadrado, todavía hay 21 cuadrados completamente vacíos. Las frecuencias esperadas bajo la hipótesis nula de un patrón aleatorio dependen solo del número medio por celda,
+
+```{r}
+mean(count_t_1)
+```
+
+y como una estimación preliminar de la desviación de la aleatoriedad, calculamos la razón varianza-media (recuerde que con la distribución de Poisson la varianza es igual a la media):
+
+```{r}
+var(count_t_1)/mean(count_t_1)
+```
+
+Estos datos están claramente agregados (la relación varianza-media es mayor que 1), por lo que podríamos comparar los conteos con una distribución binomial negativa. Las frecuencias esperadas se estiman multiplicando nuestro número total de cuadrados (100) por las densidades de probabilidad de una distribución binomial negativa generada por la función dnbinom. Esto tiene tres argumentos: los conteos para los que queremos las probabilidades (0:10), la media ($\mu = 2.57$) y el parámetro de agregación $k = \frac{\mu^2}{(var-\mu)} = size = 3.44$:
+
+```{r}
+mean(count_t_1)^2/(var(count_t_1)-mean(count_t_1))
+```
+Las frecuencias esperadas son:
+
+```{r}
+(expected_t <- sort(dnbinom(0:10, size=3.44, mu=2.57)*100))
+```
+
+Estos están razonablemente cerca de las frecuencias observadas (arriba) pero necesitamos cuantificar la falta de ajuste. El plan es mostrar las frecuencias observadas y esperadas como pares de barras, una al lado de la otra
+
+```{r}
+expected_t1 <- expected_t[11:3]
+count_t_2 <- c(21,16,15,16,14,10,2,3,3)
+dat_exp <- data.frame(count_t_2,expected_t1)
+
+fig_exp <- plot_ly(data=dat_exp,y=~count_t_2,type='bar',name = "Observado")
+fig_exp <- fig_exp %>% add_trace(y=~expected_t1,name = "Esperado")
+fig_exp <- fig_exp %>% layout(xaxis=list(title=""),
+                              yaxis=list(title="Frecuencias"))
+
+fig_exp
+```
+
+El ajuste es razonablemente bueno, pero necesitamos una estimación cuantitativa de la falta de acuerdo entre las distribuciones observadas y esperadas. El chi-cuadrado de Pearson es quizás el más simple. Necesitamos recortar los vectores observados y esperados para que ninguna de las frecuencias esperadas sea menor que 2. La inspección muestra que la frecuencia esperada más baja mayor que 2 está en la ubicación 7, por lo que acumularemos todas las frecuencias en las ubicaciones 6 y superiores
+
+```{r}
+expected_t1[7] <- sum(expected_t1[7:length(expected_t1)])
+expected_t1 <- expected_t1[-c(8:length(expected_t1))]
+count_t_2[7] <- sum(count_t_2[7:length(count_t_2)])
+count_t_2 <- count_t_2[-c(8:length(count_t_2))]
+```
+
+Ahora calcule el chi cuadrado de Pearson como $\sum[(O-E)^2/2]$
+
+```{r}
+sum((count_t_2-expected_t1)^2/expected_t1)
+```
+
+El número de grados de libertad es el número de comparaciones legítimas (7) menos el número de parámetros estimados a partir de los datos (2) menos 1 para la contingencia (es decir, $7-2-1 = 4$ d.f.). Entonces, la probabilidad de obtener un valor de chi cuadrado de este tamaño ($3.35$) o mayor es:
+
+```{r}
+1-pchisq(3.35,4)
+```
+
+Concluimos que el binomio negativo es una descripción imperfecta de estos datos cuadráticos (porque $p <0.05$). La razón de la importante falta de ajuste es la grave subestimación de los cuadrantes que contienen solo un árbol y el exceso de cuadrantes que contienen seis o siete árboles.
+
+### CVontando cosas en mapas
+
+La convención es que si un punto cae exactamente en el eje x o exactamente en el eje y, entonces se cuenta como si estuviera dentro del área (puntos verdes en el mapa de abajo), pero si cae en el eje superior o en la derecha. eje de la mano, entonces está fuera del área (puntos rojos).
+
+```{r}
+plot(c(0,2),c(0,2),type="n",xlab="",ylab="")
+lines(c(0,1,1,0,0),c(0,0,1,1,0))
+points(c(0.5,0),c(0,0.5),pch=16,col="green",cex=1.5)
+points(c(0.5,1),c(1,0.5),pch=16,col="red",cex=1.5)
+```
+
+De esa manera, todos los puntos en el mapa tienen la misma probabilidad de ser contados y no hay doble conteo de puntos. Los puntos rojos en el eje superior se contarán en el siguiente cuadrante al norte, y los puntos rojos en el eje de la derecha se contarán en el siguiente cuadrante al este.
+
+Esta convención de recuento está incorporada en la función R llamada $cut$, utilizando corchetes y corchetes como este: "(b1, b2]", "(b2, b3]"... Para el valor predeterminado derecho = VERDADERO; aquí, el círculo corchete significa 'mayor que' y el corchete significa 'menor o igual que'. Para nuestra convención, necesitamos especificar right = FALSE. Ahora tenemos "[b1, b2)", "[b2, b3)". . . donde el corchete significa "mayor o igual que" y el corchete significa "menor que". A continuación, se muestran algunos datos de prueba:
+
+```{r}
+x_cp <- runif(52,0,1)
+length(x_cp)
+y_cp <- runif(52,0,1)
+
+plot(x_cp,y_cp,pch=16,col="green")
+lines(c(0,1,1,0,0),c(0,0,1,1,0),lty=2)
+lines(c(0.2,0.2),c(0,1),lty=2)
+lines(c(0.4,0.4),c(0,1),lty=2)
+lines(c(0.6,0.6),c(0,1),lty=2)
+lines(c(0.8,0.8),c(0,1),lty=2)
+lines(c(0,1),c(0.2,0.2),lty=2)
+lines(c(0,1),c(0.4,0.4),lty=2)
+lines(c(0,1),c(0.6,0.6),lty=2)
+lines(c(0,1),c(0.8,0.8),lty=2)
+```
+
+Queremos contar el número de puntos en cada uno de los 25 cuadrantes que miden 0,2 × 0,2. La función para lograr esto se corta. Necesitamos especificar seis valores en los que cortar el eje $x$ y seis valores en los que cortar el eje $y$. La función convierte el vector de valores continuos de $x_cp$ en un factor $x_c$ con cinco niveles (y convierte las coordenadas y en niveles de factor dentro de $y_c$ de la misma manera):
+
+```{r}
+xc <- cut(x_cp,seq(0,1,0.2),right = FALSE)
+yc <- cut(y_cp,seq(0,1,0.2),right = FALSE)
+```
+
+Contamos el número de puntos en cada cuadrante usando una tabla, así:
+
+```{r}
+table(yc,xc)
+```
+
+Podemos arreglar esto reordenando los niveles de factor de $y_c$ usando $rev$ para invertir el orden de las filas:
+
+```{r}
+yc <- factor(yc,rev(levels(yc)))
+```
+
+```{r}
+table(yc,xc)
+```
+
+## 26.4 - Paquetes para estadística espacial
+
+Además de la biblioteca espacial incorporada, hay dos paquetes de contribución sustancial para analizar datos espaciales. La biblioteca $Spatstat$ es lo que necesita para el análisis estadístico de patrones de puntos espaciales, mientras que la biblioteca $spdep$ es buena para el análisis espacial de datos de regiones mapeadas.
+
+Con patrones de puntos, las cosas que querrá hacer incluyen:
+
+* Creación, manipulación y trazado de patrones de puntos.
+
+* Análisis de datos exploratorios.
+
+* Simulación de modelos de procesos puntuales.
+
+* Ajuste del modelo paramétrico.
+
+* Pruebas de hipótesis y diagnósticos.
+
+mientras que con los mapas podrías
+
+* calcular estadísticas espaciales básicas como la I de Moran y la C de Geary.
+
+* Crear objetos vecinos de clase nb.
+
+* Crear objetos de lista de pesos de clase lw.
+
+* Calcular las relaciones vecinas a partir de polígonos (contornos de regiones).
+
+* Regiones mapeadas en color sobre la base de estadísticas derivadas.
+
+Debe tomarse un tiempo para dominar los diferentes formatos de los objetos de datos utilizados por los dos paquetes. Perderá mucho tiempo si intenta utilizar las funciones de estas bibliotecas con sus propios archivos de datos no reconstruidos. Aquí está el código para instalar y leer sobre $Spatstat$ y $spdep$:
+
+### 26.4.1 - El paquete spatstat 
+
+Necesita usar la función ppp para convertir sus datos de coordenadas en un objeto de clase $ppp$ que representa un conjunto de datos de patrón de puntos en el plano bidimensional. Nuestro siguiente marco de datos contiene información sobre la ubicación y el tamaño de 3359 plantas de hierba cana en un mapa de 30 m × 15 m:
+
+```{r,message=F,warning=F}
+data_rwm <- read.delim("D:/Kevin/Trabajos/Diseno de Experimentos/therbook/ragwortmap2006.txt",header = T)
+attach(data_rwm)
+names(data_rwm)
+```
+Las plantas se clasifican como pertenecientes a uno de cuatro tipos: los esqueletos son tallos muertos de plantas que florecieron el año anterior, el rebrote son esqueletos que tienen brotes vivos en la base, las plántulas son plantas pequeñas (de unas pocas semanas) y las rosetas son plantas más grandes. (uno o más años) destinados a florecer este año. La función ppp requiere vectores separados para las coordenadas $x$ y $y$: estos están en nuestro archivo con los nombres $xcoord$ y $ycoord$. Los argumentos tercero y cuarto de $ppp$ son las coordenadas de límite para $x$ y $y$ respectivamente (en este ejemplo c (0,3000) para $x$ y c (0,1500) para $y$). El argumento final de $ppp$ contiene un vector de lo que se conoce como "marks": estos son los niveles de factor asociados con cada uno de los puntos (en este caso, el tipo es esqueleto, rebrote, plántula o roseta). Le da un nombre al objeto $ppp$ ($ragwort$) y lo define así:
+
+```{r}
+xcoord <- as.numeric(data_rwm$xcoord)
+ycoord <- as.numeric(data_rwm$ycoord)
+type_rgw <- as.factor(data_rwm$type)
+
+ragwort <- ppp(xcoord,ycoord,c(0,3000),c(0,1500),marks=type_rgw)
+```
+
+Ahora puede usar el objeto llamado $ragwort$ en una gran cantidad de funciones diferentes para trazar y modelar estadísticos dentro de la biblioteca Spatstat. Por ejemplo, aquí hay mapas de los patrones de puntos para los cuatro tipos de plantas por separado:
+
+```{r}
+plot(split(ragwort),main="",pch=16)
+```
+
+```{r}
+summary(ragwort)
+```
+
+que calcula la frecuencia y la intensidad de cada marca ("intensidad" es la densidad media de puntos por unidad de área). En este caso, donde las distancias están en centímetros, la intensidad es el número medio de plantas por centímetro cuadrado (la intensidad más alta son los esqueletos, con 0.000 44 cm – 2). La función $quadratcount$ produce un resumen útil de recuentos:
+
+```{r}
+plot(quadratcount(ragwort),main="")
+```
+
+Este es el valor predeterminado, pero puede especificar el número de cuadrantes en las direcciones $x$ y $y$ (por defecto 5 y 5), o proporcionar vectores numéricos que den las coordenadas xey de los límites de los cuadrantes. Si queremos recuentos en cuadrados de 0,5 m:
+
+```{r}
+plot(quadratcount(ragwort,
+                  xbreaks=c(0,500,1000,1500,2000,2500,3000),
+                  ybreaks=c(0,500,1000,1500)),main="")
+```
+
+Hay funciones para producir gráficos de densidad del patrón de puntos:
+
+```{r}
+Z_rgw <- density.ppp(ragwort)
+plot(Z_rgw,main="")
+```
+
+La descripción gráfica clásica de los patrones de puntos espaciales es la K de Ripley
+
+```{r}
+K <- Kest(ragwort)
+plot(K, main = "K function")
+```
+
+La línea de puntos roja muestra el número esperado de plantas dentro de un radio r de una planta bajo el supuesto de completa aleatoriedad espacial. La curva observada (negra) se encuentra por encima de esta línea, lo que indica una fuerte agregación espacial en todas las escalas espaciales hasta más de 300 cm.
+
+La función de correlación de pares pcf para los datos de hierba cana se ve así:
+
+```{r}
+pc <- pcf(ragwort)
+plot(pc, main = "Pair correlation function")
+```
+
+Existe una fuerte correlación entre pares de plantas a escalas pequeñas, pero mucho menos por encima de r = 20 cm. La función $distmap$ muestra el mapa de distancias alrededor de plantas individuales:
+
+```{r}
+Z_rgw_1 <- distmap(ragwort)
+plot(Z_rgw_1,main="")
+```
+
+Puede utilizar $Spatstat$ para generar una amplia gama de patrones de puntos aleatorios, incluidos puntos aleatorios uniformes independientes, procesos de puntos de Poisson no homogéneos, procesos de inhibición y procesos de puntos de Gibbs utilizando Metropolis-Hastings (consulte $?Spatstat$ para obtener más detalles). Algunas funciones útiles sobre distancias de punto a punto en $Spatstat$ incluyen:
+
+$nndist$      Distancia del vecino más cercano
+
+$nnwhich$     Encontrar el vecino más cercano
+
+$pairdist$    Distancias entre todos los pares de puntos
+
+$crossdist$   Distacias entre puntos en dos patrones
+
+$exactdt$     Distancia desde cualquier lugar al punto de información más cercano
+
+$distmap$     Distancia del mapa
+ 
+$density.ppp$ densidad del núcleo suavizada
+
+Hay varias estadísticas de resumen para un patrón de puntos de varios tipos con un componente $\$marks$ que es un factor:
+
+$Gcross,~Gdot,~Gmulti$  Multiple distribuciones para los vecinos cercanos.
+
+$Kcross,~Kdot,~Kmulti$  Multiples funciones K.
+
+$Jcross,~Jdot,~Jmulti$  Multiples funciones J.
+
+$Alltypes$              Estimaciones de lo anterior para todos los pares $i$, $j$.
+
+$Lest$                  Multiples funciones I.
+
+$Kcross.inhom$          Contraparte no homogénea de $Kcross$.
+
+$Kdot.inhom$            Contraparte no homogénea de $Kdot$
+
+Los modelos de procesos puntuales se ajustan utilizando la función ppm de la siguiente manera:
+
+```{r}
+model_36 <- ppm(ragwort, ~marks + polynom(x, y, 2), Poisson())
+plot(model_36)
+```
+
+Se han producido ocho mapas de este tipo, que muestran medias (cuatro mapas) y errores estándar (cuatro mapas).
+
+```{r}
+summary(model_36)
+```
+
+produce una tabla enorme de resultados, que incluye lo que los autores denominan "detalles sangrientos".
+
+## 26.4.2 - El paquete spdep
+
+La clave para utilizar este paquete es comprender las diferencias entre los distintos formatos en los que se pueden almacenar los datos espaciales:
+
+* Coordenadas $x$ y $y$ (en una matriz de dos columnas, con x en la columna 1 e y en 2).
+
+* Listas de regiones que son vecinas a cada región, con números (potencialmente) desiguales de vecinos en diferentes casos (esto se llama archivo de vecino y pertenece a la clase nb).
+
+* Marcos de datos que contienen una región, su vecino y el peso estadístico de la asociación entre las dos regiones en cada fila (class data.frame).
+
+* Listas que contienen las identidades de los k vecinos más cercanos (clase knn).
+
+* Un objeto de lista de pesos adecuado para calcular la I de Moran o la C de Geary (clase lw);
+
+* Listas de polígonos, que definen los contornos de regiones en un mapa (clase polylist).
+
+A diferencia de $Spatstat$ donde las coordenadas $x$ y $y$ estaban en vectores separados, $spdep$ quiere las coordenadas $x$ y $y$ en una única matriz de dos columnas. Para los datos de hierba cana (p. 845) necesitamos escribir:
+
+```{r}
+myco <- cbind(xcoord,ycoord)
+myco <- matrix(myco,ncol=2)
+```
+
+Una lista sin procesar de coordenadas no contiene información sobre vecinos, pero podemos usar la función $knearneigh$ para convertir una matriz de coordenadas en un objeto de clase knn. Aquí preguntamos por los cuatro vecinos más cercanos de cada planta:
+
+```{r}
+myco.knn <- knearneigh(myco, k=4)
+```
+
+Esta lista de objetos tiene la siguiete estructura.
+
+```{r}
+str(myco.knn)
+```
+
+* $\$nn$ contiene 3359 listas, cada una de las cuales es un vector de longitud 4, que contiene las identidades de los cuatro puntos que son los vecinos más cercanos de cada uno de los puntos del 1 al 3359.
+
+* $\$np$ (un número entero) es el número de puntos en el patrón.
+
+* $\$k$ es el número de vecinos de cada punto.
+
+* $\$dimension$ es 2.
+
+* $\$x$ es la matriz de coordenadas de cada punto ($x$ en la primera columna, $y$ en la segunda).
+
+Antes de que pueda hacer mucho con un objeto knn, normalmente querrá convertirlo en un objeto vecino (nb) usando la función $knn2nb$ como esta:
+
+```{r}
+myco.nb <- knn2nb(myco.knn)
+```
+
+El concepto esencial para usar el paquete spdep es el objeto vecino (con clase nb). Para una ubicación dada, típicamente identificada por las coordenadas (x, y) de su centroide, el objeto vecino es una lista, con los elementos de la lista numerados del 1 al número de ubicaciones, y cada elemento de la lista contiene un vector. de enteros que representan las identidades de las ubicaciones que comparten un límite con esa ubicación. El punto importante es que es probable que los diferentes vectores tengan diferentes longitudes. Puedes hacer cosas interesantes con nb objects. Aquí hay una gráfica con cada punto unido a sus cuatro vecinos más cercanos: usted especifica el objeto nb y la matriz de coordenadas:
+
+```{r}
+plot(myco.nb,myco,pch=16)
+```
+
+La forma más sencilla de crear un objeto nb es leer un archivo de texto que contenga una fila para cada relación de vecino, utilizando la función de entrada especial read.gwt2nb. La fila de encabezado puede adoptar una de dos formas. El más simple (llamado "GWT de estilo antiguo") es un único entero que indica el número de ubicaciones en el archivo. Siempre habrá muchas más filas en el archivo de datos que este número, porque cada ubicación normalmente tendrá varios vecinos. La segunda forma de la fila de encabezado tiene cuatro elementos: el primero se establece arbitrariamente en cero, el segundo es el número entero de ubicaciones, el tercero es el nombre del objeto de forma y el cuarto es el vector de nombres que identifican las ubicaciones. Un ejemplo debería aclarar esto. Estos son los contenidos de un texto
+archivo llamado naydf.txt:
+
+El 5 de la primera fila indica que este archivo contiene información sobre cinco ubicaciones. En las líneas siguientes, el primer número identifica la ubicación, el segundo número identifica a uno de sus vecinos y el tercer número es el peso de esa relación. Por lo tanto, la ubicación 5 tiene solo dos vecinos, y son las ubicaciones 3 y 4 (las dos últimas filas del archivo). Creamos un objeto vecino para estos datos con la función read.gwt2nb como esta:
+
+```{r}
+dd <- read.gwt2nb("D:/Kevin/Trabajos/Diseno de Experimentos/therbook/naydf.txt")
+```
+
+A continuación, se muestra un resumen del objeto vecino recién creado llamado dd:
+
+```{r}
+summary(dd)
+```
+
+Aquí hay 5 vectores de vecinos
+
+```{r}
+dd[[1]]
+dd[[2]]
+dd[[3]]
+dd[[4]]
+dd[[5]]
+```
+
+las coordenadas de las 5 locaiones necesitan ser especificadas
+
+```{r}
+coox <- c(1,2,3,4,5)
+cooy <- c(3,1,2,0,3)
+```
+
+y los vectores de coordenadas deben combinarse en una matriz de dos columnas. Ahora podemos usar $plot$ con $dd$ y la matriz de coordenadas para indicar las relaciones vecinas de las cinco ubicaciones de esta manera:
+
+```{r}
+plot(dd,matrix(cbind(coox,cooy),ncol=2))
+text(coox,cooy,as.character(1:5),pos=rep(3,5))
+```
+
+Tenga en cuenta el uso de $pos = 3$ para colocar los números de ubicación del 1 al 5 sobre sus puntos. Puede ver que las ubicaciones 1 y 5 son las menos conectadas (dos vecinos) y la ubicación 3 es la más conectada (cuatro vecinos). Tenga en cuenta que la especificación en el archivo de datos no fue completamente recíproca, porque la ubicación 4 se definió como un vecino de ubicación 3 pero no al revés. Hay un comentario, Lista **de vecinos no simétricos**, en la salida del resumen (dd) para llamar la atención sobre esto. Una función $make.sym.nb (dd)$ está disponible para convertir el objeto dd en una lista de vecinos simétricos.
+
+Para calcular índices como la I de Moran y la C de Geary, necesita un objeto de "lista de pesos". Esto se crea más simplemente a partir de un objeto vecino usando la función $nb2listw$. Para los datos de $ragwort$, ya hemos creado un objeto vecino llamado $myco.nb$ y creamos el objeto de lista de pesos myco.lw así:
+
+```{r}
+myco.lw <- nb2listw(myco.nb, style="W")
+myco.lw
+```
+
+Ahí hay 3 pruebas clásicas basadas en productos espaciales cruzados $C(i,j)$ donde $z(i)=[x(i)-\frac{\mu(x)}{sd(x)}]$
+
+* Moran $C(i,j)=z(i)z(j)$
+
+* Geary $C(i,j)=(z(i)-z(j))^2$
+
+* Sokal $C(i,j)=|z(i)-z(j)|$
+
+Aquí está la prueba del índice de Moran para $ragwort$, usando el objeto de la lista de pesos $myco.lw$:
+
+```{r}
+moran(1:3359,myco.lw,length(myco.nb),Szero(myco.lw))
+```
+
+Aquí está la C de Gary para la misma información
+
+```{r}
+geary(1:3359,myco.lw,length(myco.nb),length(myco.nb)-1,Szero(myco.lw))
+```
+
+La prueba de permutación de Mantel:
+
+```{r}
+sp.mantel.mc(1:3359,myco.lw,nsim=99)
+```
+
+En todos los casos, el primer argumento es un vector de números de ubicación (1 a 3359 en el ejemplo $ragwort$), el segundo argumento es el objeto de lista de peso myco.lw. Para moran, el tercer argumento es la longitud del objeto vecino, length ($myco.nb$) y el cuarto es Szero ($myco.lw4$), la suma global de pesos, los cuales se evalúan a 3359 en este caso. La función geary tiene un argumento adicional, $length (myco.nb)$ -1, y $sp.mantel.mc$ especifica el número de simulaciones.
+
+## 26.4.3 - Lista de poligonos
+
+Quizás los datos espaciales más complejos manejados por $spdep$ comprenden contornos digitalizados (conjuntos de coordenadas $x$ y $y$) que definen múltiples regiones, cada una de las cuales puede ser interpretada por R como un polígono. Aquí hay una lista de este tipo del conjunto de datos integrado de $columbus$:
+
+```{r}
+data(columbus)
+polys
+```
+
+Cada elemento de la lista contiene una matriz de dos columnas con coordenadas x en la columna 1 y coordenadas y en la columna 2, con tantas filas como puntos digitalizados haya en el contorno del polígono en cuestión. Después de la matriz de coordenadas viene el cuadro de límite y varias opciones de trazado.
+
+Hay una función muy útil $poly2nb$ que toma la lista de polígonos y determina qué regiones son vecinas entre sí buscando límites compartidos. El resultado es un objeto nb (aquí llamado colnbs), y podemos obtener una verificación visual de qué tan bien ha funcionado poly2nb superponiendo las relaciones vecinas en un mapa de los contornos del polígono:
+
+```{r}
+#colnbs <- poly2nb(polys)
+#plot(c(5.5,11.5),c(10.5,15),type="n",xlab="",ylab="")
+#for (i in 1:49) polygon(polys[[i]][,1],polys[[i]][,2],col="lightgrey")
+#plot(colnbs,coords,add=T,col="red")
+```
+
+## 26.5 - Información geoestadística
+
+Los datos mapeados comúnmente muestran el valor de una variable de respuesta continua (por ejemplo, la concentración de un mineral) en diferentes ubicaciones espaciales. El problema fundamental con este tipo de datos es la pseudorreplicación espacial. Los puntos calientes tienden a generar una gran cantidad de datos, y estos datos tienden a ser bastante similares porque provienen esencialmente del mismo lugar. Los puntos fríos están poco representados y, por lo general, están muy separados. Grandes áreas entre los puntos fríos no tienen ningún dato.
+
+La estadística espacial tiene en cuenta esta autocorrelación espacial de diversas formas. La herramienta fundamental de la estadística espacial es el variograma (o semivariograma). Esto mide la rapidez con la que la autocorrelación espacial, γ (h), cae al aumentar la distancia:
+
+$$\gamma(h)=\frac{1}{2|N(h)|}\sum_{N(h)}{(z_i-z_j)^2}$$
+
+Aquí N (h) es el conjunto de todas las distancias euclidianas por pares i - j = h, | N (h) | es el número de pares distintos dentro de N (h), y zi y zj son valores de la variable de respuesta en las ubicaciones espaciales i y j. Hay dos reglas generales importantes: (1) la distancia de confiabilidad del variograma es menos de la mitad de la distancia máxima en todo el campo de datos; y (2) solo debe considerar producir un variograma empírico cuando tenga más de 30 puntos de datos en el mapa.
+
+Las gráficas del variograma empírico contra la distancia se caracterizan por algunas características con nombres curiosos que delatan su origen en la prospección geológica:
+
+* **nugget** variación a pequeña escala más error de medición
+
+* **sill** el valor asintótico de $\gamma(h)$ como $h\rightarrow \infty$, que representa la varianza del campo aleatorio
+
+* **range** la distancia umbral (si existe) más allá de la cual los datos ya no están autocorrelacionados.
+
+Las gráficas de variograma que no tienen asíntotas pueden ser sintomáticas de datos con tendencia o un proceso estocástico no estacionario. El covariograma C (h) es la covarianza de los valores de z en la separación h, para todo $i$ e $i + h$ dentro de la distancia máxima en todo el campo de datos:
+
+$$cov(Z(i+h),Z(i))=C(h)$$
+
+El correlograma es una relación de covarianzas:
+
+$$\rho(h)=\frac{C(h)}{C(0)}=1-\frac{\gamma(h)}{C(0)}$$
+
+Aquí $C(0)$ es la varianza del campo aleatorio y $\gamma(h)$ es el variograma. Donde el variograma aumenta con la distancia, el correlograma y el covariograma disminuyen con la distancia.
+
+El variograma asume que los datos están sin tendencia. Si hay tendencias, entonces una opción es el pulido medio. Esto implica modelar efectos de fila y columna del mapa de esta manera:
+
+$$y \sim overall~mean+row~effect+column~effect+residual$$
+
+Este modelo bidireccional asume efectos aditivos y no funcionaría si hubiera una interacción entre las filas y columnas del mapa. Una alternativa sería utilizar un modelo aditivo generalizado con suavizadores no paramétricos para latitud y longitud.
+
+La anisotropía ocurre cuando la autocorrelación espacial cambia con la dirección. Si el umbral cambia con la dirección, esto se llama anisotropía zonal. Cuando es el rango el que cambia con la dirección, el proceso se llama anisotropía geométrica.
+
+Los geógrafos tienen la maravillosa habilidad de hacer que las ideas más simples parezcan complicadas. Kriging no es más que una interpolación lineal a través del espacio. El kriging ordinario utiliza un modelo de función aleatoria de correlación espacial para calcular una combinación lineal ponderada de las muestras disponibles para predecir la respuesta para una ubicación no medida. El kriging universal es una modificación del kriging ordinario que permite las tendencias espaciales. No hablamos más aquí de los modelos de predicción espacial; los detalles se pueden encontrar en Kaluzny et al. (1998). Nuestra preocupación es el uso de información espacial en la interpretación de estudios experimentales u observacionales que tienen una única variable de respuesta. El énfasis está en el uso de medidas específicas de la ubicación para modelar la estructura de autocorrelación espacial de los datos.
+
+La idea de un variograma es ilustrar la forma en que la varianza espacial aumenta con la escala espacial (o, alternativamente, cómo la correlación entre vecinos disminuye con la distancia). Confusamente, R tiene dos funciones con el mismo nombre: variograma ("v" minúscula) está en la biblioteca espacial y Variograma ("V" mayúscula) está en nlme. Su uso se contrasta aquí para los datos de $ragwort$.
+
+Para usar $variogram$ de la biblioteca $Spatial$, necesita crear una superficie de tendencia o un objeto kriging con columnas $ x $, $ y $ y $ z $. Las dos primeras columnas son las coordenadas espaciales, mientras que la tercera contiene la variable de respuesta (diámetro del tallo basal en el caso de los datos de $ragwort$)
+
+```{r}
+names(data_rwm)
+```
+
+```{r}
+diameter_rgw <- as.factor(data_rwm$diameter) 
+
+dts <- data.frame(x=xcoord,y=ycoord,z=diameter_rgw)
+```
+
+A continuación, debe crear una superficie de tendencia utilizando una función como $surf.ls$:
+
+```{r}
+
+#surface <- surf.ls(2,dts)
+```
+
+Este objeto de superficie de tendencia es entonces el primer argumento del variograma, seguido del número de bins (aquí 300). La función calcula la diferencia cuadrática promedio para pares con separación en cada contenedor, y devuelve resultados para contenedores que contienen seis o más pares:
+
+```{r}
+#variogram(surface,300)
+```
+
+La función hermana es el correlograma, que toma argumentos idénticos:
+
+```{r}
+#correlogram(surface,300)
+```
+
+Las correlaciones positivas han desaparecido en unos 100 cm. Las correlaciones en xp = 3000 son efectos de borde espurios.
+
+Para la función Variograma en la biblioteca nlme, necesita ajustar un modelo (normalmente usando gls o lme), luego proporcionar el objeto modelo junto con una función de formulario en la llamada:
+
+```{r}
+#model_37 <- gls(diameter~xcoord+ycoord)
+#plot(Variogram(model_37,form= ~xcoord+ycoord))
+```
+
+## 26.6 - Modelos de regresión con errores espacialmente correlacionados: mínimos cuadrados generalizados
+
+Analizamos el uso de modelos lineales de efectos mixtos para tratar los efectos aleatorios y la pseudorreplicación temporal. Aquí ilustramos el uso de mínimos cuadrados generalizados (GLS) para modelos de regresión donde esperaríamos que los valores vecinos de la variable de respuesta estuvieran correlacionados. La gran ventaja de la función gls es que los errores pueden correlacionarse y / o tener variaciones desiguales. La función gls es parte del paquete $nlme$:
+
+El siguiente ejemplo es un ensayo a escala geográfica para comparar los rendimientos de 56 variedades diferentes de trigo. Lo que hace que el análisis sea más desafiante es que las granjas que llevaron a cabo el ensayo se distribuyeron en una amplia gama de latitudes y longitudes.
+
+```{r,message=F,warning=F}
+spatialdata <- read.delim("D:/Kevin/Trabajos/Diseno de Experimentos/therbook/spatialdata.txt",header=T)
+attach(spatialdata)
+names(spatialdata)
+```
+
+Comenzamos con la inspección de datos gráficos para ver el efecto de la ubicación en el rendimiento:
+
+```{r,include=F}
+latitude_sp <- as.factor(spatialdata$latitude)
+longitude_sp <- as.factor(spatialdata$longitude)
+yield_sp <- as.factor(spatialdata$yield)
+variety_sp <- as.factor(spatialdata$variety)
+Block_sp <- as.factor(spatialdata$Block) 
+data_sp <- data.frame(longitude_sp,latitude_sp,yield_sp,variety_sp,Block_sp)
+```
+
+```{r}
+fig_sp <- plot_ly(data=data_sp,x = latitude_sp,y = yield_sp)
+fig_sp <- fig_sp %>% add_markers(color ="black")
+fig_sp <- fig_sp %>% layout(xaxis=list(title="Latitude"),
+                            yaxis = list(title="Yield"))
+fig_sp
+```
+
+```{r}
+fig_sp_l <- plot_ly(data=data_sp,x = longitude_sp,y = yield_sp)
+fig_sp_l <- fig_sp_l %>% add_markers(color ="black")
+fig_sp_l <- fig_sp_l %>% layout(xaxis=list(title="Longitude"),
+                            yaxis = list(title="Yield"))
+fig_sp_l
+```
+
+Claramente, existen grandes efectos de la latitud y la longitud tanto en el rendimiento medio como en la variación del rendimiento. El efecto de latitud parece un efecto de umbral, con poco impacto para latitudes inferiores a 30. El efecto de longitud parece más continuo pero hay un indicio de no linealidad (tal vez incluso una joroba). Las variedades difieren sustancialmente en sus rendimientos medios:
+
+```{r,message=F,warning=F}
+yield_sp <- as.numeric(yield_sp)
+variety_sp <- as.numeric(variety_sp)
+yie_v <- sort(tapply(yield_sp,variety_sp,mean))
+barplot(yie_v,col="green")
+```
+
+Las variedades de menor rendimiento producen alrededor de 20 y las más altas alrededor de 30 kg de grano por unidad de área. También hay efectos de bloque sustanciales sobre el rendimiento:
+
+```{r}
+yield_sp <- as.numeric(yield_sp)
+Block_sp <- as.numeric(Block_sp)
+tapply(yield_sp,Block_sp,mean)
+```
+
+Aquí está el análisis más simple posible: un análisis de varianza unidireccional que usa la variedad como la única variable explicativa:
+
+```{r}
+variety_sp <- as.numeric(variety_sp)
+yield_sp <- as.numeric(yield_sp)
+model_38 <- aov(yield_sp~variety_sp)
+summary(model_38)
+```
+
+Esto dice que no hay diferencias significativas entre los rendimientos de las 56 variedades. Podemos probar un análisis de parcelas divididas usando variedades anidadas dentro de bloques:
+
+```{r}
+Block_sp <- as.numeric(Block_sp)
+class(yield_sp)
+model_39 <- aov(yield_sp~Block_sp+variety_sp+Error(Block_sp))
+summary(model_39)
+```
+
+Esto no ha cambiado nuestra interpretación. Podríamos ajustar la latitud y la longitud como covariables:
+
+```{r}
+model_40 <- aov(yield_sp~Block_sp+variety_sp+latitude_sp+longitude_sp)
+summary(model_40)
+```
+
+Esto marca una enorme diferencia. Ahora las diferencias entre variedades son cercanas a la significancia ($p = 0.0565$).
+
+Finalmente, podríamos usar un modelo GLS para introducir la covarianza espacial entre los rendimientos de ubicaciones cercanas. Comenzamos haciendo un objeto de datos agrupado:
+
+```{r}
+space <- groupedData(yield_sp~variety_sp|Block_sp)
+```
+
+Usamos esto para ajustar un modelo usando $gls$ que permite que los errores estén correlacionados y tengan variaciones desiguales. Agregaremos estas sofisticaciones más adelante:
+
+```{r}
+model_41 <- gls(yield_sp~variety_sp-1,space)
+summary(model_41)
+```
+
+y así sucesivamente, para las 56 variedades. Se dan las medias de variedad, en lugar de diferencias entre medias, porque eliminamos la intersección del modelo utilizando rendimiento ~ variedad-1 en lugar de rendimiento ~ variedad en la fórmula del modelo. Ahora queremos incluir la covarianza espacial. La función Variograma se aplica a model_41 así:
+
+```{r,message=F,warning=F}
+plot(Variogram(model_41,form=~latitude_sp+longitude_sp))
+```
+
+El variograma de muestra aumenta con la distancia, lo que ilustra la correlación espacial esperada. Extrapolando de nuevo a la distancia cero, parece haber una pepita de alrededor de 0,2. Hay varias suposiciones que podríamos hacer sobre la correlación espacial en estos datos. Por ejemplo, podríamos probar una estructura de correlación esférica, usando la clase corSpher (el rango de opciones para la estructura de correlación espacial se muestra en la Tabla 26.1). Necesitamos especificar la distancia a que el semivariograma alcanza primero 1. La inspección muestra que esta distancia es aproximadamente 28. Podemos actualizar model4 para incluir esta información:
+
+```{r}
+model_42 <- update(model_41,corr=corSpher(c(28,0.2),form=~latitude_sp+longitude_sp,nugget=T))
+summary(model_42)
+```
+
+Esta es una gran mejora y el AIC ha caído de 1354,742 a 1185,863. El $range$ (27,46) y la$ nugget$ (0,209) están muy cerca de nuestras estimaciones visuales. Existen otros tipos de modelos espaciales, por supuesto. Podríamos probar un modelo cuadrático racional ($corRatio$); esto necesita una estimación de la distancia a la que se encuentra el semivariograma $(1 + nugget) / 2 = 1,2 / 2 = 0,6$, así como una estimación de la pepita. La inspección da una distancia de aproximadamente 12,5, por lo que escribimos:
+
+```{r}
+model_43 <- update(model_41,
+corr=corRatio(c(12.5,0.2),form=~latitude_sp+longitude_sp,nugget=T))
+```
+
+Podemos usar anova para comparar los dos modelos espaciales:
+
+```{r}
+anova(model_42,model_43)
+```
+
+El modelo cuadrático racional (modelo_43) tiene el AIC más bajo y, por lo tanto, se prefiere al modelo esférico. Para probar la significancia de los parámetros de correlación espacial, necesitamos comparar el modelo espacial preferido6 con el modelo no espacial model_41 (que asumió errores espacialmente independientes):
+
+```{r}
+anova(model_41,model_43)
+```
+
+Los dos grados de libertad extra utilizados para dar cuenta de la estructura espacial están claramente justificados. Necesitamos comprobar la idoneidad del modelo de $corRatio$. Esto se hace mediante la inspección del variograma de muestra para los residuos normalizados del model_43:
+
+```{r}
+plot(Variogram(model_43,resType="n"))
+```
+
+No hay patrón en la gráfica del variograma de muestra, por lo que concluimos que el cuadrático racional es adecuado. Para verificar la constancia de la varianza, podemos graficar los residuales normalizados contra los valores ajustados de esta manera:
+
+```{r}
+plot(model_43,resid( ., type="n")~fitted(.),abline=0)
+```
+
+y la gráfica normal se obtiene de la forma habitual:
+
+```{r}
+qqnorm(model_43,~resid(.,type="n"))
+```
+
+El modelo luce bien.
+El siguiente paso es investigar la importancia de las diferencias entre las variedades. Utilice la actualización para cambiar la estructura del modelo de $yield~variety-1$ a $yield~variety$:
+
+```{r}
+model_44 <- update(model_43,model=yield~variety)
+anova(model_44)
+```
+
+Las diferencias entre las variedades ahora parecen ser altamente significativas (recuerde que solo fueron marginalmente significativas con nuestro modelo lineal3 usando análisis de covarianza para tener en cuenta los efectos de latitud y longitud). Los contrastes específicos entre variedades se pueden realizar utilizando el argumento L de anova. Suponga que queremos comparar los rendimientos medios de la primera y la tercera variedad. Para hacer esto, configuramos un vector de coeficientes de contraste c (-1,0,1) y aplicamos el contraste así:
+
+```{r}
+#anova(model_43,L=c(-1,0,1))
+```
+
+Tenga en cuenta que usamos model_43 (con todas las medias de variedad), no model7 (con una intersección y contrastes de Helmert). Las variedades especificadas, Arapahoe y Buckskin, presentan diferencias muy significativas en el rendimiento medio.
+
+## 26.7 - Crear un mapa de distribución de puntos a partir de una base de datos relacional
+
+A continuación se muestra un ejemplo de cómo extraer un subconjunto relativamente pequeño de datos de una gran base de datos relacional y utilizar la información para producir un mapa de distribución de puntos. La base de datos de Access contiene dos tablas relacionadas:
+
+* $sites$ contiene información sobre 2628 ubicaciones.
+
+* $records$ contienen listas de especies encontradas en cada sitio (43 001 en total).
+
+Las dos tablas están relacionadas por una variable llamada número de sitio. La tarea consiste en extraer este y norte para cada registro de una especie nombrada, y usarlos para producir un mapa de distribución de puntos, con un punto para cada sitio en el que se registró esa especie en particular.
+
+```{r}
+#channel <- odbcConnect("berks")
+```
+
+
+Para completar el mapa necesitas:
+
+* Leer un archivo de coordenadas $x$ y $y$ para el contorno de la región que se está mapeando (el condado de Berkshire en este ejemplo).
+
+* Dibuje el contorno en una parcela sin ningún rótulo en los ejes.
+
+* Utilice el eje para etiquetar con un solo dígito (las referencias de la cuadrícula tienen 5 dígitos).
+
+* Agregue una cuadrícula usando abline con líneas grises.
+
+* Especificar una especie para cartografiar.
+
+* Leer las coordenadas de esta especie en R de la base de datos de Access
+
+* Use puntos para agregar los puntos de distribución al mapa.
+Aquí está el esquema del condado de Berkshire.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
