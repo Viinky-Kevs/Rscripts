@@ -1,6 +1,6 @@
 ---
 title: "The R Book"
-author: "Sergio Rocha & Kevin Quiroga"
+author: "Kevin Quiroga"
 date: "17/11/2020"
 output: html_document
 ---
